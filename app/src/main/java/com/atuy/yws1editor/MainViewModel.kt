@@ -91,6 +91,7 @@ data class EditorUiState(
     val saveMinute: Int = 0,
     val startupSlotsLoaded: Boolean = false,
     val isCheatMode: Boolean = false,
+    val hasUnsavedChanges: Boolean = false,
 )
 
 class MainViewModel : ViewModel() {
@@ -381,6 +382,7 @@ class MainViewModel : ViewModel() {
                 saveHour = saveInfo?.saveHour ?: it.saveHour,
                 saveMinute = saveInfo?.saveMinute ?: it.saveMinute,
                 message = "$sectionName に切り替えました",
+                hasUnsavedChanges = false,
             )
         }
     }
@@ -393,6 +395,7 @@ class MainViewModel : ViewModel() {
                 currentScreen = AppScreen.Editor,
                 selectedTopTab = EditorTopTab.Yokai,
                 expandedYokaiSlot = null,
+                hasUnsavedChanges = false,
             )
         }
         load(path)
@@ -403,6 +406,7 @@ class MainViewModel : ViewModel() {
             it.copy(
                 currentScreen = AppScreen.Startup,
                 startupSlotsLoaded = false,
+                hasUnsavedChanges = false,
             )
         }
     }
@@ -523,7 +527,11 @@ class MainViewModel : ViewModel() {
             } else {
                 state.entries.map { normalizeForNormalMode(it) }
             }
-            state.copy(isCheatMode = enabled, entries = normalizedEntries)
+            state.copy(
+                isCheatMode = enabled,
+                entries = normalizedEntries,
+                hasUnsavedChanges = state.hasUnsavedChanges || normalizedEntries != state.entries,
+            )
         }
     }
 
@@ -652,21 +660,33 @@ class MainViewModel : ViewModel() {
     fun updatePlayHours(value: Int) {
         if (isFileOperationBusy()) return
         _uiState.update { state ->
-            state.copy(playHours = value.coerceAtLeast(0))
+            val updated = value.coerceAtLeast(0)
+            state.copy(
+                playHours = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.playHours,
+            )
         }
     }
 
     fun updatePlayMinutes(value: Int) {
         if (isFileOperationBusy()) return
         _uiState.update { state ->
-            state.copy(playMinutes = value.coerceIn(0, 59))
+            val updated = value.coerceIn(0, 59)
+            state.copy(
+                playMinutes = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.playMinutes,
+            )
         }
     }
 
     fun updateMoney(value: Int) {
         if (isFileOperationBusy()) return
         _uiState.update { state ->
-            state.copy(money = value.coerceIn(0, SaveInfoCodec.MONEY_MAX))
+            val updated = value.coerceIn(0, SaveInfoCodec.MONEY_MAX)
+            state.copy(
+                money = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.money,
+            )
         }
     }
 
@@ -678,40 +698,44 @@ class MainViewModel : ViewModel() {
             state.copy(
                 playerName = truncated,
                 playerNameError = if (limited) null else "プレイヤー名はUTF-8で最大23バイトです",
+                hasUnsavedChanges = state.hasUnsavedChanges || truncated != state.playerName,
             )
         }
     }
 
     fun updateSaveYear(value: Int) {
         if (isFileOperationBusy()) return
-        _uiState.update { state -> state.copy(saveYear = value.coerceIn(0, 9999)) }
+        _uiState.update { state -> state.withSaveYear(value.coerceIn(0, 9999)) }
     }
 
     fun updateSaveMonth(value: Int) {
         if (isFileOperationBusy()) return
-        _uiState.update { state -> state.copy(saveMonth = value.coerceIn(1, 12)) }
+        _uiState.update { state -> state.withSaveMonth(value.coerceIn(1, 12)) }
     }
 
     fun updateSaveDay(value: Int) {
         if (isFileOperationBusy()) return
-        _uiState.update { state -> state.copy(saveDay = value.coerceIn(1, 31)) }
+        _uiState.update { state -> state.withSaveDay(value.coerceIn(1, 31)) }
     }
 
     fun updateSaveHour(value: Int) {
         if (isFileOperationBusy()) return
-        _uiState.update { state -> state.copy(saveHour = value.coerceIn(0, 23)) }
+        _uiState.update { state -> state.withSaveHour(value.coerceIn(0, 23)) }
     }
 
     fun updateSaveMinute(value: Int) {
         if (isFileOperationBusy()) return
-        _uiState.update { state -> state.copy(saveMinute = value.coerceIn(0, 59)) }
+        _uiState.update { state -> state.withSaveMinute(value.coerceIn(0, 59)) }
     }
 
     private fun updateEntry(slot: Int, updater: (YokaiEntry) -> YokaiEntry) {
         if (isFileOperationBusy()) return
         _uiState.update { state ->
             val updated = state.entries.map { if (it.slot == slot) updater(it) else it }
-            state.copy(entries = updated)
+            state.copy(
+                entries = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.entries,
+            )
         }
     }
 
@@ -854,9 +878,35 @@ class MainViewModel : ViewModel() {
                 saveHour = loadedData.saveInfo.saveHour,
                 saveMinute = loadedData.saveInfo.saveMinute,
                 message = message,
+                hasUnsavedChanges = false,
             )
         }
     }
+
+    private fun EditorUiState.withSaveYear(value: Int) = copy(
+        saveYear = value,
+        hasUnsavedChanges = hasUnsavedChanges || value != saveYear,
+    )
+
+    private fun EditorUiState.withSaveMonth(value: Int) = copy(
+        saveMonth = value,
+        hasUnsavedChanges = hasUnsavedChanges || value != saveMonth,
+    )
+
+    private fun EditorUiState.withSaveDay(value: Int) = copy(
+        saveDay = value,
+        hasUnsavedChanges = hasUnsavedChanges || value != saveDay,
+    )
+
+    private fun EditorUiState.withSaveHour(value: Int) = copy(
+        saveHour = value,
+        hasUnsavedChanges = hasUnsavedChanges || value != saveHour,
+    )
+
+    private fun EditorUiState.withSaveMinute(value: Int) = copy(
+        saveMinute = value,
+        hasUnsavedChanges = hasUnsavedChanges || value != saveMinute,
+    )
 
     private fun buildYokaiOptions(data: YokaiMasterData): List<YokaiOption> {
         return data.nameById

@@ -44,6 +44,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -248,9 +249,17 @@ private fun AppScreen(
     mainBinPath: String,
 ) {
     val state by mainViewModel.uiState.collectAsState()
+    var showDiscardChangesDialog by remember { mutableStateOf(false) }
+    val requestBackToStartup = {
+        if (state.hasUnsavedChanges) {
+            showDiscardChangesDialog = true
+        } else {
+            mainViewModel.backToStartup()
+        }
+    }
 
     BackHandler(enabled = state.currentScreen == AppScreen.Editor) {
-        mainViewModel.backToStartup()
+        requestBackToStartup()
     }
 
     LaunchedEffect(state.currentScreen, shizukuGranted, state.startupSlotsLoaded) {
@@ -271,6 +280,11 @@ private fun AppScreen(
             shizukuStatusMessage = shizukuStatusMessage,
             loading = state.loading,
             message = state.message,
+            onRefresh = {
+                if (shizukuGranted && !state.loading) {
+                    mainViewModel.loadStartupSlots(mainBinPath)
+                }
+            },
             onSelectSlot = { sectionName ->
                 mainViewModel.openEditorForSection(mainBinPath, sectionName)
             },
@@ -282,7 +296,7 @@ private fun AppScreen(
             shizukuGranted = shizukuGranted,
             isCheatMode = state.isCheatMode,
             onCheatModeChange = mainViewModel::setCheatMode,
-            onBack = mainViewModel::backToStartup,
+            onBack = requestBackToStartup,
             onSave = { mainViewModel.save(mainBinPath) },
             onCreateBackup = { name, epochMillis ->
                 mainViewModel.createBackup(mainBinPath, name, epochMillis)
@@ -320,9 +334,33 @@ private fun AppScreen(
             modifier = modifier,
         )
     }
+
+    if (showDiscardChangesDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardChangesDialog = false },
+            title = { Text("編集内容を破棄しますか？") },
+            text = { Text("保存していない変更があります。最初の画面に戻ると変更内容は失われます。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDiscardChangesDialog = false
+                        mainViewModel.backToStartup()
+                    },
+                ) {
+                    Text("破棄して戻る")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardChangesDialog = false }) {
+                    Text("キャンセル")
+                }
+            },
+        )
+    }
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun StartupScreen(
     slots: List<SaveSlotCard>,
     selectedSection: String,
@@ -330,63 +368,70 @@ private fun StartupScreen(
     shizukuStatusMessage: String,
     loading: Boolean,
     message: String,
+    onRefresh: () -> Unit,
     onSelectSlot: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    PullToRefreshBox(
+        isRefreshing = loading,
+        onRefresh = onRefresh,
+        modifier = modifier.fillMaxSize(),
     ) {
-        Text("セーブデータ選択", fontWeight = FontWeight.Bold)
-        Text("編集するセーブデータを選んでください")
-        if (!shizukuGranted) {
-            Text(shizukuStatusMessage)
-        }
-        if (message.isNotBlank()) {
-            Text(message)
-        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .statusBarsPadding()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("セーブデータ選択", fontWeight = FontWeight.Bold)
+            Text("編集するセーブデータを選んでください")
+            if (!shizukuGranted) {
+                Text(shizukuStatusMessage)
+            }
+            if (message.isNotBlank()) {
+                Text(message)
+            }
 
-        slots.forEach { slot ->
-            val isSelected = slot.sectionName == selectedSection
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = shizukuGranted && !loading && slot.hasData) {
-                        onSelectSlot(slot.sectionName)
-                    },
-            ) {
-                Column(
+            slots.forEach { slot ->
+                val isSelected = slot.sectionName == selectedSection
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                        .clickable(enabled = shizukuGranted && !loading && slot.hasData) {
+                            onSelectSlot(slot.sectionName)
+                        },
                 ) {
-                    Text(
-                        text = slot.title,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    )
-                    Text(slot.subtitle)
-                    if (!slot.hasData) {
-                        Text("データがありません")
-                    } else {
-                        Text("プレイヤー名: ${slot.displayName ?: "-"}")
-                        Text("プレイ時間: ${slot.playTimeText ?: "未解析"}")
-                        Text("セーブ日時: ${slot.saveDateText ?: "未解析"}")
-                    }
-                    Text("妖怪数: ${slot.yokaiCount?.toString() ?: "-"}")
-                    if (isSelected) {
-                        Text("現在の選択")
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = slot.title,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        )
+                        Text(slot.subtitle)
+                        if (!slot.hasData) {
+                            Text("データがありません")
+                        } else {
+                            Text("プレイヤー名: ${slot.displayName ?: "-"}")
+                            Text("プレイ時間: ${slot.playTimeText ?: "未解析"}")
+                            Text("セーブ日時: ${slot.saveDateText ?: "未解析"}")
+                        }
+                        Text("妖怪数: ${slot.yokaiCount?.toString() ?: "-"}")
+                        if (isSelected) {
+                            Text("現在の選択")
+                        }
                     }
                 }
             }
-        }
 
-
-        if (loading) {
-            Text("読み込み中...")
+            if (loading) {
+                Text("読み込み中...")
+            }
         }
     }
 }
