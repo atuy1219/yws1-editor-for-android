@@ -34,6 +34,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Set app version
+        run: |
+          echo "VERSION_CODE=$(($(git show -s --format=%ct HEAD) / 60))" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=nightly-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
       - name: Build Release and Debug APKs
         run: ./gradlew assembleRelease assembleDebug -x lint
         env:
@@ -60,6 +65,7 @@ jobs:
           files: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/mapping/release/mapping.txt
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
