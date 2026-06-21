@@ -42,7 +42,7 @@ jobs:
         run: ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
 
       - name: Upload debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: yws1-editor-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
@@ -51,7 +51,7 @@ jobs:
 
       - name: Upload reports on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-ci-reports-${{ github.sha }}
           path: |
