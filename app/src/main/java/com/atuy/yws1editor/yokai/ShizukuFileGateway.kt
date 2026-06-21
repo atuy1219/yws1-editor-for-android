@@ -1,4 +1,4 @@
-package com.atuy.yweditor.yokai
+package com.atuy.yws1editor.yokai
 
 import android.content.pm.PackageManager
 import rikka.shizuku.Shizuku

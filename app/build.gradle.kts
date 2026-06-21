@@ -4,13 +4,13 @@ plugins {
 }
 
 android {
-    namespace = "com.atuy.yweditor"
+    namespace = "com.atuy.yws1editor"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.atuy.yweditor"
+        applicationId = "com.atuy.yws1editor"
         minSdk = 35
         targetSdk = 36
         versionCode = 1

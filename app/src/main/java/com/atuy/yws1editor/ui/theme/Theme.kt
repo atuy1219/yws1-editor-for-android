@@ -1,4 +1,4 @@
-package com.atuy.yweditor.ui.theme
+package com.atuy.yws1editor.ui.theme
 
 import android.app.Activity
 import android.os.Build

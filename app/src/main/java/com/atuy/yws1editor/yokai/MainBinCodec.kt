@@ -1,4 +1,4 @@
-package com.atuy.yweditor.yokai
+package com.atuy.yws1editor.yokai
 
 import java.io.IOException
 import kotlin.text.Charsets

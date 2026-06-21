@@ -1,4 +1,4 @@
-package com.atuy.yweditor
+package com.atuy.yws1editor
 
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -71,17 +71,17 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.atuy.yweditor.ui.theme.YwEditorTheme
-import com.atuy.yweditor.yokai.MainBinBackupInfo
-import com.atuy.yweditor.yokai.SaveInfoCodec
-import com.atuy.yweditor.yokai.ShizukuFileGateway
-import com.atuy.yweditor.yokai.Stat5
-import com.atuy.yweditor.yokai.StatGroup
-import com.atuy.yweditor.yokai.YokaiAttitude
-import com.atuy.yweditor.yokai.YokaiEntry
-import com.atuy.yweditor.yokai.YokaiMasterLoader
-import com.atuy.yweditor.yokai.YokaiStatusCalculator
-import com.atuy.yweditor.yokai.yokaiClassLabel
+import com.atuy.yws1editor.ui.theme.YwEditorTheme
+import com.atuy.yws1editor.yokai.MainBinBackupInfo
+import com.atuy.yws1editor.yokai.SaveInfoCodec
+import com.atuy.yws1editor.yokai.ShizukuFileGateway
+import com.atuy.yws1editor.yokai.Stat5
+import com.atuy.yws1editor.yokai.StatGroup
+import com.atuy.yws1editor.yokai.YokaiAttitude
+import com.atuy.yws1editor.yokai.YokaiEntry
+import com.atuy.yws1editor.yokai.YokaiMasterLoader
+import com.atuy.yws1editor.yokai.YokaiStatusCalculator
+import com.atuy.yws1editor.yokai.yokaiClassLabel
 import rikka.shizuku.Shizuku
 import java.text.SimpleDateFormat
 import java.util.Date

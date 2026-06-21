@@ -1,7 +1,7 @@
-package com.atuy.yweditor.yokai
+package com.atuy.yws1editor.yokai
 
 import android.content.Context
-import com.atuy.yweditor.R
+import com.atuy.yws1editor.R
 
 data class YokaiMasterDetail(
     val baseStats: Stat5,
