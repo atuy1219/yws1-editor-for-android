@@ -126,7 +126,7 @@ class ShizukuFileGateway {
             .toList()
     }
 
-    fun restoreManagedBackup(path: String, backupFileName: String) {
+    fun readManagedBackup(path: String, backupFileName: String): ByteArray {
         val backup = parseManagedBackup(backupFileName)
             ?: throw IOException("不正なバックアップ名です: $backupFileName")
         if (backup.second.isBlank()) {
@@ -134,10 +134,44 @@ class ShizukuFileGateway {
         }
 
         val sourcePath = "${backupDir(path)}/$backupFileName"
-        exec(arrayOf("sh", "-c", "cp ${shellQuote(sourcePath)} ${shellQuote(path)}"))
+        return readBytes(sourcePath)
     }
 
     fun writeBytes(path: String, data: ByteArray) {
+        val temporaryPath = "$path.yws1editor.tmp"
+        runCommandForText(
+            arrayOf("sh", "-c", "rm -f ${shellQuote(temporaryPath)}"),
+            onErrorReturnEmpty = true,
+        )
+
+        try {
+            writeBytesDirect(temporaryPath, data)
+            val written = readBytes(temporaryPath)
+            if (!written.contentEquals(data)) {
+                throw IOException("一時ファイルの書き込み検証に失敗しました")
+            }
+
+            val metadata = runCommandForText(
+                arrayOf("sh", "-c", "stat -c '%u:%g %a' ${shellQuote(path)}"),
+            ).lineSequence().firstOrNull()?.trim()
+                ?: throw IOException("元ファイルの属性を取得できません")
+            val metadataMatch = Regex("^(\\d+):(\\d+) ([0-7]{3,4})$").matchEntire(metadata)
+                ?: throw IOException("元ファイルの属性が不正です: $metadata")
+            val ownership = "${metadataMatch.groupValues[1]}:${metadataMatch.groupValues[2]}"
+            val mode = metadataMatch.groupValues[3]
+            exec(arrayOf("sh", "-c", "chown $ownership ${shellQuote(temporaryPath)}"))
+            exec(arrayOf("sh", "-c", "chmod $mode ${shellQuote(temporaryPath)}"))
+
+            exec(arrayOf("sh", "-c", "mv -f ${shellQuote(temporaryPath)} ${shellQuote(path)}"))
+        } finally {
+            runCommandForText(
+                arrayOf("sh", "-c", "rm -f ${shellQuote(temporaryPath)}"),
+                onErrorReturnEmpty = true,
+            )
+        }
+    }
+
+    private fun writeBytesDirect(path: String, data: ByteArray) {
         val process = startProcess(arrayOf("sh", "-c", "cat > ${shellQuote(path)}"))
         outputStreamOf(process).use {
             it.write(data)
@@ -261,4 +295,3 @@ class ShizukuFileGateway {
         return "'" + path.replace("'", "'\"'\"'") + "'"
     }
 }
-

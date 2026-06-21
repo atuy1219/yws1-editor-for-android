@@ -1,5 +1,7 @@
 package com.atuy.yws1editor.yokai
 
+import java.io.IOException
+
 data class SaveInfo(
     val playHours: Int,
     val playMinutes: Int,
@@ -12,7 +14,7 @@ data class SaveInfo(
     val saveMinute: Int,
 )
 
-data class SaveInfoWriteResult(
+class SaveInfoWriteResult(
     val gameData: ByteArray,
     val headData: ByteArray,
 )
@@ -39,6 +41,7 @@ object SaveInfoCodec {
 
     fun parse(gameData: ByteArray, headData: ByteArray, sectionName: String): SaveInfo {
         val base = slotBaseOffset(sectionName)
+        validateSectionSizes(gameData, headData, base)
         val seconds = readUInt32Le(gameData, PLAY_TIME_GAME_OFFSET)
         val hours = (seconds / 3600L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         val minutes = ((seconds % 3600L) / 60L).toInt()
@@ -73,6 +76,7 @@ object SaveInfoCodec {
         val gameOut = baseGameData.copyOf()
         val headOut = baseHeadData.copyOf()
         val base = slotBaseOffset(sectionName)
+        validateSectionSizes(gameOut, headOut, base)
 
         val hours = info.playHours.coerceAtLeast(0)
         val minutes = info.playMinutes.coerceIn(0, 59)
@@ -113,17 +117,14 @@ object SaveInfoCodec {
     }
 
     private fun readUInt8(data: ByteArray, offset: Int): Int {
-        if (offset !in data.indices) return 0
         return data[offset].toInt() and 0xFF
     }
 
     private fun readUInt16Le(data: ByteArray, offset: Int): Int {
-        if (offset + 1 >= data.size) return 0
         return (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
     }
 
     private fun readUInt32Le(data: ByteArray, offset: Int): Long {
-        if (offset + 3 >= data.size) return 0L
         return ((data[offset].toLong() and 0xFFL)) or
             ((data[offset + 1].toLong() and 0xFFL) shl 8) or
             ((data[offset + 2].toLong() and 0xFFL) shl 16) or
@@ -144,18 +145,15 @@ object SaveInfoCodec {
     }
 
     private fun writeUInt8(data: ByteArray, offset: Int, value: Int) {
-        if (offset !in data.indices) return
         data[offset] = (value and 0xFF).toByte()
     }
 
     private fun writeUInt16Le(data: ByteArray, offset: Int, value: Int) {
-        if (offset + 1 >= data.size) return
         data[offset] = (value and 0xFF).toByte()
         data[offset + 1] = ((value ushr 8) and 0xFF).toByte()
     }
 
     private fun writeUInt32Le(data: ByteArray, offset: Int, value: Long) {
-        if (offset + 3 >= data.size) return
         val v = value.toInt()
         data[offset] = (v and 0xFF).toByte()
         data[offset + 1] = ((v ushr 8) and 0xFF).toByte()
@@ -164,10 +162,7 @@ object SaveInfoCodec {
     }
 
     private fun writePlayerName(data: ByteArray, name: String) {
-        val writable = (data.size - PLAYER_NAME_OFFSET).coerceAtLeast(0)
-        if (writable <= 0) return
-
-        val regionSize = minOf(PLAYER_NAME_MAX_BYTES, writable)
+        val regionSize = PLAYER_NAME_MAX_BYTES
         for (index in 0 until regionSize) {
             data[PLAYER_NAME_OFFSET + index] = 0
         }
@@ -183,5 +178,22 @@ object SaveInfoCodec {
             )
         }
     }
-}
 
+    private fun validateSectionSizes(gameData: ByteArray, headData: ByteArray, slotBase: Int) {
+        val requiredGameSize = maxOf(
+            PLAY_TIME_GAME_OFFSET + Int.SIZE_BYTES,
+            MONEY_OFFSET + Int.SIZE_BYTES,
+            PLAYER_NAME_OFFSET + PLAYER_NAME_MAX_BYTES,
+        )
+        val requiredHeadSize = maxOf(
+            slotBase + PLAY_TIME_SUMMARY_RELATIVE_OFFSET + Int.SIZE_BYTES,
+            slotBase + SAVE_DATE_RELATIVE_OFFSET + 6,
+        )
+        if (gameData.size < requiredGameSize) {
+            throw IOException("gameセクションが短すぎます: ${gameData.size} < $requiredGameSize")
+        }
+        if (headData.size < requiredHeadSize) {
+            throw IOException("head.ywが短すぎます: ${headData.size} < $requiredHeadSize")
+        }
+    }
+}

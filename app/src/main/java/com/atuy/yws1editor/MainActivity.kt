@@ -71,6 +71,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.lifecycleScope
 import com.atuy.yws1editor.ui.theme.YwEditorTheme
 import com.atuy.yws1editor.yokai.MainBinBackupInfo
 import com.atuy.yws1editor.yokai.SaveInfoCodec
@@ -84,24 +85,23 @@ import com.atuy.yws1editor.yokai.YokaiStatusCalculator
 import com.atuy.yws1editor.yokai.yokaiClassLabel
 import rikka.shizuku.Shizuku
 import java.text.SimpleDateFormat
+import java.io.File
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
-
-private val MAIN_BIN_PATH = listOf(
-    "",
-    "data",
-    "user",
-    "0",
-    "jp.co.level5.yws1",
-    "files",
-    "save",
-    "main.bin",
-).joinToString("/")
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
     private val gateway = ShizukuFileGateway()
+    private val mainBinPath: String by lazy {
+        val currentUserDataRoot = requireNotNull(File(applicationInfo.dataDir).parentFile) {
+            "現在ユーザーのデータディレクトリを解決できません"
+        }
+        File(currentUserDataRoot, "jp.co.level5.yws1/files/save/main.bin").path
+    }
 
     private val requestCode = 1001
     private var shizukuGranted by mutableStateOf(false)
@@ -116,7 +116,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Shizuku.addRequestPermissionResultListener(permissionListener)
-        vm.setMasterData(YokaiMasterLoader.load(this))
+        lifecycleScope.launch {
+            val masterData = withContext(Dispatchers.IO) {
+                YokaiMasterLoader.load(this@MainActivity)
+            }
+            vm.setMasterData(masterData)
+        }
         shizukuGranted = gateway.hasPermission()
         if (!shizukuGranted && gateway.isShizukuRunning()) {
             gateway.requestPermission(requestCode)
@@ -133,6 +138,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         mainViewModel = vm,
                         shizukuGranted = shizukuGranted,
+                        mainBinPath = mainBinPath,
                     )
                 }
             }
@@ -150,6 +156,7 @@ private fun AppScreen(
     modifier: Modifier = Modifier,
     mainViewModel: MainViewModel = viewModel(),
     shizukuGranted: Boolean,
+    mainBinPath: String,
 ) {
     val state by mainViewModel.uiState.collectAsState()
 
@@ -163,7 +170,7 @@ private fun AppScreen(
             shizukuGranted &&
             !state.startupSlotsLoaded
         ) {
-            mainViewModel.loadStartupSlots(MAIN_BIN_PATH)
+            mainViewModel.loadStartupSlots(mainBinPath)
         }
     }
 
@@ -175,7 +182,7 @@ private fun AppScreen(
             loading = state.loading,
             message = state.message,
             onSelectSlot = { sectionName ->
-                mainViewModel.openEditorForSection(MAIN_BIN_PATH, sectionName)
+                mainViewModel.openEditorForSection(mainBinPath, sectionName)
             },
             modifier = modifier,
         )
@@ -186,13 +193,13 @@ private fun AppScreen(
             isCheatMode = state.isCheatMode,
             onCheatModeChange = mainViewModel::setCheatMode,
             onBack = mainViewModel::backToStartup,
-            onSave = { mainViewModel.save(MAIN_BIN_PATH) },
+            onSave = { mainViewModel.save(mainBinPath) },
             onCreateBackup = { name, epochMillis ->
-                mainViewModel.createBackup(MAIN_BIN_PATH, name, epochMillis)
+                mainViewModel.createBackup(mainBinPath, name, epochMillis)
             },
-            onRefreshBackups = { mainViewModel.refreshBackups(MAIN_BIN_PATH) },
+            onRefreshBackups = { mainViewModel.refreshBackups(mainBinPath) },
             onRestoreBackup = { backupFileName ->
-                mainViewModel.restoreBackup(MAIN_BIN_PATH, backupFileName)
+                mainViewModel.restoreBackup(mainBinPath, backupFileName)
             },
             onTabSelect = mainViewModel::selectTopTab,
             onYokaiCardClick = { slot ->
@@ -334,6 +341,11 @@ private fun EditorScreen(
     var topChromeOffsetPx by remember { mutableStateOf(0f) }
     var topChromeHeightPx by remember { mutableStateOf(0f) }
     val density = LocalDensity.current
+    val fileOperationBusy = state.loading ||
+        state.saving ||
+        state.backupsLoading ||
+        state.backupsCreating ||
+        state.backupsRestoring
 
     val nestedScrollConnection = remember {
         object : NestedScrollConnection {
@@ -453,7 +465,7 @@ private fun EditorScreen(
                 actions = {
                     TextButton(
                         onClick = { showCreateBackupDialog.value = true },
-                        enabled = shizukuGranted && state.loaded && !state.backupsCreating && !state.saving,
+                        enabled = shizukuGranted && state.loaded && !fileOperationBusy,
                     ) {
                         Text("バックアップ")
                     }
@@ -462,13 +474,13 @@ private fun EditorScreen(
                             onRefreshBackups()
                             showBackupListDialog.value = true
                         },
-                        enabled = shizukuGranted && state.loaded && !state.backupsLoading && !state.backupsRestoring,
+                        enabled = shizukuGranted && state.loaded && !fileOperationBusy,
                     ) {
                         Text("リストア")
                     }
                     IconButton(
                         onClick = onSave,
-                        enabled = shizukuGranted && state.loaded && !state.saving,
+                        enabled = shizukuGranted && state.loaded && !fileOperationBusy,
                     ) {
                         Icon(imageVector = Icons.Filled.Save, contentDescription = "保存")
                     }

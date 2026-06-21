@@ -21,7 +21,7 @@ class MainBinCodec {
         c
     }
 
-    private val primes: IntArray = generatePrimes(256)
+    private val primes: IntArray = generatePrimes()
 
     fun decode(mainBin: ByteArray): MainBinDecoded {
         if (mainBin.size < 0xC0) {
@@ -34,15 +34,24 @@ class MainBinCodec {
             val size = readIntLe(mainBin, headerPos + 8)
             if (size <= 8) continue
 
-            val payloadStart = defaultPayloadBase + offset
-            val payloadEnd = payloadStart + size
-            if (payloadStart < 0 || payloadEnd > mainBin.size) {
+            val payloadStartLong = defaultPayloadBase.toLong() + offset.toLong()
+            val payloadEndLong = payloadStartLong + size.toLong()
+            if (
+                payloadStartLong < defaultPayloadBase.toLong() ||
+                payloadEndLong > mainBin.size.toLong()
+            ) {
                 throw IOException("$name の範囲が不正です")
             }
+            val payloadStart = payloadStartLong.toInt()
 
             val encryptedSize = size - 8
+            val storedCrc = readIntLe(mainBin, payloadStart + encryptedSize)
             val seed = readIntLe(mainBin, payloadStart + encryptedSize + 4)
             val encrypted = mainBin.copyOfRange(payloadStart, payloadStart + encryptedSize)
+            val actualCrc = calcCrc32(encrypted)
+            if (storedCrc != actualCrc) {
+                throw IOException("$name のCRCが一致しません")
+            }
             val decrypted = cipherData(encrypted, seed)
 
             sections[name] = MainSection(
@@ -94,7 +103,8 @@ class MainBinCodec {
         return crc xor 0xFFFFFFFF.toInt()
     }
 
-    private fun generatePrimes(count: Int): IntArray {
+    private fun generatePrimes(): IntArray {
+        val count = 256
         val list = ArrayList<Int>(count)
         var num = 3
         while (list.size < count) {
@@ -183,15 +193,24 @@ class MainBinCodec {
         val size = readIntLe(mainBin, headerPos + 8)
         if (size <= 8) return null
 
-        val payloadStart = payloadBase + offset
-        val payloadEnd = payloadStart + size
-        if (payloadStart < payloadBase || payloadEnd > mainBin.size) {
+        val payloadStartLong = payloadBase.toLong() + offset.toLong()
+        val payloadEndLong = payloadStartLong + size.toLong()
+        if (
+            payloadStartLong < payloadBase.toLong() ||
+            payloadEndLong > mainBin.size.toLong()
+        ) {
             throw IOException("game3.yw の範囲が不正です")
         }
+        val payloadStart = payloadStartLong.toInt()
 
         val encryptedSize = size - 8
+        val storedCrc = readIntLe(mainBin, payloadStart + encryptedSize)
         val seed = readIntLe(mainBin, payloadStart + encryptedSize + 4)
         val encrypted = mainBin.copyOfRange(payloadStart, payloadStart + encryptedSize)
+        val actualCrc = calcCrc32(encrypted)
+        if (storedCrc != actualCrc) {
+            throw IOException("game3.yw のCRCが一致しません")
+        }
         val decrypted = cipherData(encrypted, seed)
 
         return MainSection(
