@@ -48,12 +48,14 @@ class ShizukuFileGateway {
         }
     }
 
-    fun requestPermission(requestCode: Int) {
-        if (!isShizukuRunning()) return
-        try {
+    fun requestPermission(requestCode: Int): Boolean {
+        if (!isShizukuRunning()) return false
+        return try {
             Shizuku.requestPermission(requestCode)
+            true
         } catch (_: IllegalStateException) {
             // Binder 未受信直後のレースを吸収し、UI から再試行できるようにする。
+            false
         }
     }
 

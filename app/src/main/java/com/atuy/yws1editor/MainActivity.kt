@@ -105,28 +105,49 @@ class MainActivity : ComponentActivity() {
 
     private val requestCode = 1001
     private var shizukuGranted by mutableStateOf(false)
+    private var permissionRequestPending = false
+
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        requestShizukuPermissionIfNeeded()
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        permissionRequestPending = false
+        shizukuGranted = false
+    }
 
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode != this.requestCode) return@OnRequestPermissionResultListener
         runOnUiThread {
+            permissionRequestPending = false
             shizukuGranted = grantResult == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestShizukuPermissionIfNeeded() {
+        if (!gateway.isShizukuRunning()) {
+            permissionRequestPending = false
+            shizukuGranted = false
+            return
+        }
+
+        shizukuGranted = gateway.hasPermission()
+        if (!shizukuGranted && !permissionRequestPending) {
+            permissionRequestPending = gateway.requestPermission(requestCode)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Shizuku.addRequestPermissionResultListener(permissionListener)
+        Shizuku.addBinderDeadListener(binderDeadListener)
+        Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
         lifecycleScope.launch {
             val masterData = withContext(Dispatchers.IO) {
                 YokaiMasterLoader.load(this@MainActivity)
             }
             vm.setMasterData(masterData)
         }
-        shizukuGranted = gateway.hasPermission()
-        if (!shizukuGranted && gateway.isShizukuRunning()) {
-            gateway.requestPermission(requestCode)
-        }
-
         enableEdgeToEdge()
         setContent {
             YwEditorTheme {
@@ -146,6 +167,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        Shizuku.removeBinderReceivedListener(binderReceivedListener)
+        Shizuku.removeBinderDeadListener(binderDeadListener)
         Shizuku.removeRequestPermissionResultListener(permissionListener)
         super.onDestroy()
     }
