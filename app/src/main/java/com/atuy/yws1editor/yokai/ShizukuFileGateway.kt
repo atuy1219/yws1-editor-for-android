@@ -1,11 +1,9 @@
 package com.atuy.yws1editor.yokai
 
 import android.content.pm.PackageManager
+import com.atuy.yws1editor.shizuku.ShizukuFileServiceClient
 import rikka.shizuku.Shizuku
-import java.io.InputStream
 import java.io.IOException
-import java.io.OutputStream
-import java.lang.reflect.Method
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.time.Instant
@@ -26,24 +24,13 @@ class ShizukuFileGateway {
     private val managedBackupRegex = Regex("""^main_backup_(\d{12})_([A-Za-z0-9%._+-]{1,120})\.bin$""")
     private val backupTimestampFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmm")
 
-    private val newProcessMethod: Method by lazy {
-        Shizuku::class.java.getDeclaredMethod(
-            "newProcess",
-            Array<String>::class.java,
-            Array<String>::class.java,
-            String::class.java,
-        ).apply {
-            isAccessible = true
-        }
-    }
-
     fun isShizukuRunning(): Boolean = Shizuku.pingBinder()
 
     fun hasPermission(): Boolean {
         if (!isShizukuRunning()) return false
         return try {
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (_: IllegalStateException) {
+        } catch (_: RuntimeException) {
             false
         }
     }
@@ -53,29 +40,37 @@ class ShizukuFileGateway {
         return try {
             Shizuku.requestPermission(requestCode)
             true
-        } catch (_: IllegalStateException) {
+        } catch (_: RuntimeException) {
             // Binder 未受信直後のレースを吸収し、UI から再試行できるようにする。
             false
         }
     }
 
-    fun readBytes(path: String): ByteArray {
-        val command = arrayOf("sh", "-c", "cat ${shellQuote(path)}")
-        val process = startProcess(command)
+    fun isPreV11(): Boolean = Shizuku.isPreV11()
 
-        val data = inputStreamOf(process).use { it.readBytes() }
-        val error = errorStreamOf(process).use { it.readBytes().toString(Charsets.UTF_8).trim() }
-        val code = waitFor(process)
-        if (code != 0) {
-            throw IOException("読み取り失敗(code=$code): ${if (error.isBlank()) "unknown" else error}")
+    fun shouldShowRequestPermissionRationale(): Boolean {
+        return try {
+            Shizuku.shouldShowRequestPermissionRationale()
+        } catch (_: RuntimeException) {
+            false
         }
+    }
 
-        return data
+    fun serverUid(): Int? {
+        return try {
+            Shizuku.getUid()
+        } catch (_: RuntimeException) {
+            null
+        }
+    }
+
+    fun readBytes(path: String): ByteArray {
+        return ShizukuFileServiceClient.readFile(path)
     }
 
     fun backup(path: String): String {
         val backupPath = "$path.bak"
-        exec(arrayOf("sh", "-c", "cp ${shellQuote(path)} ${shellQuote(backupPath)}"))
+        ShizukuFileServiceClient.requireService().copyFile(path, backupPath)
         return backupPath
     }
 
@@ -87,8 +82,9 @@ class ShizukuFileGateway {
         val fileName = "main_backup_${timestamp}_${encodedName}.bin"
         val backupPath = "$backupsDir/$fileName"
 
-        exec(arrayOf("sh", "-c", "mkdir -p ${shellQuote(backupsDir)}"))
-        exec(arrayOf("sh", "-c", "cp ${shellQuote(path)} ${shellQuote(backupPath)}"))
+        val service = ShizukuFileServiceClient.requireService()
+        service.createDirectories(backupsDir)
+        service.copyFile(path, backupPath)
 
         val modified = lastModifiedMillis(backupPath)
         return MainBinBackupInfo(
@@ -102,14 +98,11 @@ class ShizukuFileGateway {
 
     fun listManagedBackups(path: String): List<MainBinBackupInfo> {
         val backupsDir = backupDir(path)
-        exec(arrayOf("sh", "-c", "mkdir -p ${shellQuote(backupsDir)}"))
-        val files = runCommandForText(
-            arrayOf("sh", "-c", "ls -1 ${shellQuote(backupsDir)}"),
-            onErrorReturnEmpty = true,
-        )
+        val service = ShizukuFileServiceClient.requireService()
+        service.createDirectories(backupsDir)
+        val files = service.listFileNames(backupsDir)
 
-        return files
-            .lineSequence()
+        return files.asSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .mapNotNull { fileName ->
@@ -140,92 +133,11 @@ class ShizukuFileGateway {
     }
 
     fun writeBytes(path: String, data: ByteArray) {
-        val temporaryPath = "$path.yws1editor.tmp"
-        runCommandForText(
-            arrayOf("sh", "-c", "rm -f ${shellQuote(temporaryPath)}"),
-            onErrorReturnEmpty = true,
-        )
-
-        try {
-            writeBytesDirect(temporaryPath, data)
-            val written = readBytes(temporaryPath)
-            if (!written.contentEquals(data)) {
-                throw IOException("一時ファイルの書き込み検証に失敗しました")
-            }
-
-            val metadata = runCommandForText(
-                arrayOf("sh", "-c", "stat -c '%u:%g %a' ${shellQuote(path)}"),
-            ).lineSequence().firstOrNull()?.trim()
-                ?: throw IOException("元ファイルの属性を取得できません")
-            val metadataMatch = Regex("^(\\d+):(\\d+) ([0-7]{3,4})$").matchEntire(metadata)
-                ?: throw IOException("元ファイルの属性が不正です: $metadata")
-            val ownership = "${metadataMatch.groupValues[1]}:${metadataMatch.groupValues[2]}"
-            val mode = metadataMatch.groupValues[3]
-            exec(arrayOf("sh", "-c", "chown $ownership ${shellQuote(temporaryPath)}"))
-            exec(arrayOf("sh", "-c", "chmod $mode ${shellQuote(temporaryPath)}"))
-
-            exec(arrayOf("sh", "-c", "mv -f ${shellQuote(temporaryPath)} ${shellQuote(path)}"))
-        } finally {
-            runCommandForText(
-                arrayOf("sh", "-c", "rm -f ${shellQuote(temporaryPath)}"),
-                onErrorReturnEmpty = true,
-            )
-        }
-    }
-
-    private fun writeBytesDirect(path: String, data: ByteArray) {
-        val process = startProcess(arrayOf("sh", "-c", "cat > ${shellQuote(path)}"))
-        outputStreamOf(process).use {
-            it.write(data)
-            it.flush()
-        }
-
-        val error = errorStreamOf(process).use { it.readBytes().toString(Charsets.UTF_8).trim() }
-        val code = waitFor(process)
-        if (code != 0) {
-            throw IOException("書き込み失敗(code=$code): ${if (error.isBlank()) "unknown" else error}")
-        }
+        ShizukuFileServiceClient.writeFileAtomically(path, data)
     }
 
     fun lastModifiedMillis(path: String): Long {
-        val process = startProcess(
-            arrayOf(
-                "sh",
-                "-c",
-                "stat -c %Y ${shellQuote(path)} 2>/dev/null || toybox stat -c %Y ${shellQuote(path)}",
-            ),
-        )
-        val output = inputStreamOf(process).use { it.readBytes().toString(Charsets.UTF_8).trim() }
-        val error = errorStreamOf(process).use { it.readBytes().toString(Charsets.UTF_8).trim() }
-        val code = waitFor(process)
-        if (code != 0) {
-            throw IOException("更新日時取得失敗(code=$code): ${if (error.isBlank()) "unknown" else error}")
-        }
-
-        val seconds = output.lineSequence().firstOrNull()?.toLongOrNull()
-            ?: throw IOException("更新日時の解析に失敗: $output")
-        return seconds * 1000L
-    }
-
-    private fun exec(command: Array<String>) {
-        val process = startProcess(command)
-        val error = errorStreamOf(process).use { it.readBytes().toString(Charsets.UTF_8).trim() }
-        val code = waitFor(process)
-        if (code != 0) {
-            throw IOException("コマンド失敗(code=$code): ${if (error.isBlank()) "unknown" else error}")
-        }
-    }
-
-    private fun runCommandForText(command: Array<String>, onErrorReturnEmpty: Boolean = false): String {
-        val process = startProcess(command)
-        val output = inputStreamOf(process).use { it.readBytes().toString(Charsets.UTF_8) }
-        val error = errorStreamOf(process).use { it.readBytes().toString(Charsets.UTF_8).trim() }
-        val code = waitFor(process)
-        if (code != 0) {
-            if (onErrorReturnEmpty) return ""
-            throw IOException("コマンド失敗(code=$code): ${if (error.isBlank()) "unknown" else error}")
-        }
-        return output
+        return ShizukuFileServiceClient.requireService().lastModified(path)
     }
 
     private fun backupDir(path: String): String {
@@ -259,41 +171,4 @@ class ShizukuFileGateway {
             .getOrDefault(input)
     }
 
-    private fun startProcess(command: Array<String>): Any {
-        if (!isShizukuRunning()) {
-            throw IOException("Shizuku が未接続です。Shizuku を起動してから再試行してください")
-        }
-        if (!hasPermission()) {
-            throw IOException("Shizuku の権限がありません。許可後に再試行してください")
-        }
-
-        return try {
-            newProcessMethod.invoke(null, command, null, null)
-                ?: throw IOException("Shizuku プロセスの生成に失敗しました")
-        } catch (e: IOException) {
-            throw e
-        } catch (e: Exception) {
-            throw IOException("Shizuku プロセスAPI呼び出し失敗: ${e.message}", e)
-        }
-    }
-
-    private fun inputStreamOf(process: Any): InputStream {
-        return process.javaClass.getMethod("getInputStream").invoke(process) as InputStream
-    }
-
-    private fun errorStreamOf(process: Any): InputStream {
-        return process.javaClass.getMethod("getErrorStream").invoke(process) as InputStream
-    }
-
-    private fun outputStreamOf(process: Any): OutputStream {
-        return process.javaClass.getMethod("getOutputStream").invoke(process) as OutputStream
-    }
-
-    private fun waitFor(process: Any): Int {
-        return process.javaClass.getMethod("waitFor").invoke(process) as Int
-    }
-
-    private fun shellQuote(path: String): String {
-        return "'" + path.replace("'", "'\"'\"'") + "'"
-    }
 }

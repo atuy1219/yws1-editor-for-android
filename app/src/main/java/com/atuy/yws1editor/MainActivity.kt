@@ -73,6 +73,7 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.lifecycleScope
 import com.atuy.yws1editor.ui.theme.YwEditorTheme
+import com.atuy.yws1editor.shizuku.ShizukuFileServiceClient
 import com.atuy.yws1editor.yokai.MainBinBackupInfo
 import com.atuy.yws1editor.yokai.SaveInfoCodec
 import com.atuy.yws1editor.yokai.ShizukuFileGateway
@@ -105,6 +106,7 @@ class MainActivity : ComponentActivity() {
 
     private val requestCode = 1001
     private var shizukuGranted by mutableStateOf(false)
+    private var shizukuStatusMessage by mutableStateOf("Shizukuへ接続中...")
     private var permissionRequestPending = false
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
@@ -114,13 +116,48 @@ class MainActivity : ComponentActivity() {
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
         permissionRequestPending = false
         shizukuGranted = false
+        shizukuStatusMessage = "Shizukuとの接続が切れました"
+        ShizukuFileServiceClient.reset()
     }
 
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode != this.requestCode) return@OnRequestPermissionResultListener
         runOnUiThread {
             permissionRequestPending = false
-            shizukuGranted = grantResult == PackageManager.PERMISSION_GRANTED
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                connectFileServiceIfRoot()
+            } else {
+                shizukuGranted = false
+                shizukuStatusMessage = "Shizukuの許可が拒否されました"
+            }
+        }
+    }
+
+    private fun connectFileServiceIfRoot() {
+        val uid = gateway.serverUid()
+        if (uid != 0) {
+            shizukuGranted = false
+            shizukuStatusMessage = if (uid == 2000) {
+                "ShizukuはADBモードです。このアプリの直接編集にはrootモードが必要です"
+            } else {
+                "Shizukuの実行権限を確認できません"
+            }
+            ShizukuFileServiceClient.reset()
+            return
+        }
+
+        shizukuStatusMessage = "Shizukuファイルサービスへ接続中..."
+        ShizukuFileServiceClient.setStateListener { ready ->
+            runOnUiThread {
+                shizukuGranted = ready
+                shizukuStatusMessage = if (ready) "" else "Shizukuファイルサービスへ接続できません"
+            }
+        }
+        runCatching {
+            ShizukuFileServiceClient.bind(applicationContext)
+        }.onFailure { error ->
+            shizukuGranted = false
+            shizukuStatusMessage = "Shizukuファイルサービス接続失敗: ${error.message}"
         }
     }
 
@@ -128,12 +165,33 @@ class MainActivity : ComponentActivity() {
         if (!gateway.isShizukuRunning()) {
             permissionRequestPending = false
             shizukuGranted = false
+            shizukuStatusMessage = "Shizukuを起動してください"
             return
         }
 
-        shizukuGranted = gateway.hasPermission()
-        if (!shizukuGranted && !permissionRequestPending) {
+        if (gateway.isPreV11()) {
+            shizukuGranted = false
+            shizukuStatusMessage = "このShizuku APIバージョンには対応していません"
+            return
+        }
+
+        if (gateway.hasPermission()) {
+            permissionRequestPending = false
+            connectFileServiceIfRoot()
+            return
+        }
+        shizukuGranted = false
+        if (gateway.shouldShowRequestPermissionRationale()) {
+            permissionRequestPending = false
+            shizukuStatusMessage = "Shizukuアプリの認可済みアプリ画面から許可してください"
+            return
+        }
+        if (!permissionRequestPending) {
+            shizukuStatusMessage = "Shizukuの許可を待っています..."
             permissionRequestPending = gateway.requestPermission(requestCode)
+            if (!permissionRequestPending) {
+                shizukuStatusMessage = "Shizukuの許可要求を開始できませんでした"
+            }
         }
     }
 
@@ -159,6 +217,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         mainViewModel = vm,
                         shizukuGranted = shizukuGranted,
+                        shizukuStatusMessage = shizukuStatusMessage,
                         mainBinPath = mainBinPath,
                     )
                 }
@@ -166,10 +225,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        requestShizukuPermissionIfNeeded()
+    }
+
     override fun onDestroy() {
         Shizuku.removeBinderReceivedListener(binderReceivedListener)
         Shizuku.removeBinderDeadListener(binderDeadListener)
         Shizuku.removeRequestPermissionResultListener(permissionListener)
+        ShizukuFileServiceClient.setStateListener(null)
         super.onDestroy()
     }
 }
@@ -179,6 +244,7 @@ private fun AppScreen(
     modifier: Modifier = Modifier,
     mainViewModel: MainViewModel = viewModel(),
     shizukuGranted: Boolean,
+    shizukuStatusMessage: String,
     mainBinPath: String,
 ) {
     val state by mainViewModel.uiState.collectAsState()
@@ -202,6 +268,7 @@ private fun AppScreen(
             slots = state.startupSaveSlots,
             selectedSection = state.selectedSection,
             shizukuGranted = shizukuGranted,
+            shizukuStatusMessage = shizukuStatusMessage,
             loading = state.loading,
             message = state.message,
             onSelectSlot = { sectionName ->
@@ -260,6 +327,7 @@ private fun StartupScreen(
     slots: List<SaveSlotCard>,
     selectedSection: String,
     shizukuGranted: Boolean,
+    shizukuStatusMessage: String,
     loading: Boolean,
     message: String,
     onSelectSlot: (String) -> Unit,
@@ -275,7 +343,7 @@ private fun StartupScreen(
         Text("セーブデータ選択", fontWeight = FontWeight.Bold)
         Text("編集するセーブデータを選んでください")
         if (!shizukuGranted) {
-            Text("Shizuku 権限が必要です。権限を許可してから再度選択してください。")
+            Text(shizukuStatusMessage)
         }
         if (message.isNotBlank()) {
             Text(message)

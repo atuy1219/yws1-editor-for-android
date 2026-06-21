@@ -40,7 +40,7 @@ jobs:
           echo "VERSION_NAME=nightly-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
       - name: Build Release and Debug APKs
-        run: ./gradlew assembleRelease assembleDebug -x lint
+        run: ./gradlew lintRelease assembleRelease assembleDebug
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/release.jks
           KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}

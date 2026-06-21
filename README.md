@@ -1,31 +1,31 @@
-# YW Editor (Shizuku)
+# YWS1 Editor for Android
 
-`main.bin` を Shizuku 経由で読み込み、`game0.yw`〜`game3.yw` のデータを編集して保存する Android アプリです。
+「妖怪ウォッチ1 スマホ」の`main.bin`をrootモードのShizuku経由で読み込み、
+`game0.yw`〜`game3.yw`のデータを編集して保存するAndroidアプリです。
 
 ## 実装内容
 
 - `crypt.py` / `check.py` の暗号・復号ロジックを Kotlin に移植
 - `main.bin` から `game0.yw` / `game1.yw` / `game2.yw` / `game3.yw` を選択して妖怪リストを抽出
 - 個体値などを Compose UI で編集
-- 保存時に `main.bin.bak` を作成してから上書き
+- 保存時に`main.bin.bak`を作成し、一時ファイルを検証してから置換
 
 ## 対象ファイル
 
-- `/data/user/0/com.Level5.YokaiWatch/files/main.bin`
+- `/data/user/<現在のユーザーID>/jp.co.level5.yws1/files/save/main.bin`
 
 ## 使い方
 
-1. 端末で Shizuku を起動
-2. アプリを起動し、`Shizuku許可` を押す
-3. `game0`〜`game3` から編集対象を選ぶ
-4. `main.bin読込` で一覧を表示
-5. 妖怪を選択して値を編集
-6. `保存` で選択中セーブに反映
+1. rootモードでShizukuを起動
+2. アプリを起動し、表示されたShizuku許可ダイアログを許可
+3. `game0`〜`game3`から編集対象を選択
+4. 妖怪やセーブ情報を編集
+5. `保存`で選択中セーブへ反映
 
 ## 注意
 
-- Shizuku が shell 権限で動作している場合、端末設定によっては `/data/user/0/...` へアクセスできないことがあります。
-- 書き込み前に自動バックアップ(`.bak`)を作成しますが、自己責任で利用してください。
+- ADBモード（非root）のShizukuでは、他アプリの内部データへアクセスできないため編集できません。
+- 書き込み前に自動バックアップ（`.bak`）を作成しますが、自己責任で利用してください。
 
 ## ライセンス
 

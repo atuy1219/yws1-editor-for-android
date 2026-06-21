@@ -3,6 +3,13 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val signingEnvironment = mapOf(
+    "path" to System.getenv("KEYSTORE_PATH"),
+    "storePassword" to System.getenv("KEY_STORE_PASSWORD"),
+    "keyPassword" to System.getenv("KEY_PASSWORD"),
+    "alias" to System.getenv("ALIAS"),
+)
+
 android {
     namespace = "com.atuy.yws1editor"
     compileSdk {
@@ -17,12 +24,6 @@ android {
         versionName = providers.environmentVariable("VERSION_NAME").orNull ?: "1.0"
     }
 
-    val signingEnvironment = mapOf(
-        "path" to System.getenv("KEYSTORE_PATH"),
-        "storePassword" to System.getenv("KEY_STORE_PASSWORD"),
-        "keyPassword" to System.getenv("KEY_PASSWORD"),
-        "alias" to System.getenv("ALIAS"),
-    )
     val releaseSigningConfig = if (signingEnvironment.values.all { !it.isNullOrBlank() }) {
         signingConfigs.create("release") {
             storeFile = file(signingEnvironment.getValue("path")!!)
@@ -50,6 +51,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
     buildFeatures {
+        aidl = true
         compose = true
     }
 }

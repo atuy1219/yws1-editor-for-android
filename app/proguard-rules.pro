@@ -19,3 +19,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Shizukuの別プロセスがクラス名からUserServiceを生成するため、名前を固定する。
+-keep class com.atuy.yws1editor.shizuku.ShizukuFileService { *; }
