@@ -31,7 +31,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,7 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -383,15 +385,57 @@ private fun StartupScreen(
                 .verticalScroll(rememberScrollState())
                 .statusBarsPadding()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("セーブデータ選択", fontWeight = FontWeight.Bold)
-            Text("編集するセーブデータを選んでください")
-            if (!shizukuGranted) {
-                Text(shizukuStatusMessage)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "セーブデータ",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "編集するスロットを選択してください",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            if (message.isNotBlank()) {
-                Text(message)
+
+            Surface(
+                color = if (shizukuGranted) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.errorContainer
+                },
+                contentColor = if (shizukuGranted) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onErrorContainer
+                },
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = if (shizukuGranted) "Shizuku 接続済み" else "Shizukuを確認してください",
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (!shizukuGranted) {
+                        Text(shizukuStatusMessage, style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text("下に引っ張るとセーブ情報を再読み込みできます", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+            if (message.isNotBlank() && !loading) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             slots.forEach { slot ->
@@ -402,35 +446,83 @@ private fun StartupScreen(
                         .clickable(enabled = shizukuGranted && !loading && slot.hasData) {
                             onSelectSlot(slot.sectionName)
                         },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
+                        },
+                    ),
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Text(
-                            text = slot.title,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        )
-                        Text(slot.subtitle)
-                        if (!slot.hasData) {
-                            Text("データがありません")
-                        } else {
-                            Text("プレイヤー名: ${slot.displayName ?: "-"}")
-                            Text("プレイ時間: ${slot.playTimeText ?: "未解析"}")
-                            Text("セーブ日時: ${slot.saveDateText ?: "未解析"}")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = slot.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = slot.subtitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        Text("妖怪数: ${slot.yokaiCount?.toString() ?: "-"}")
+                        if (!slot.hasData) {
+                            Text(
+                                text = "データがありません",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                text = slot.displayName ?: "名前未設定",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                text = "${slot.playTimeText ?: "未解析"}  •  妖怪 ${slot.yokaiCount?.toString() ?: "-"}体",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                text = "セーブ日時  ${slot.saveDateText ?: "未解析"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         if (isSelected) {
-                            Text("現在の選択")
+                            Text(
+                                text = "選択中",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                            )
                         }
                     }
                 }
             }
 
             if (loading) {
-                Text("読み込み中...")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .width(24.dp)
+                            .height(24.dp),
+                        strokeWidth = 2.5.dp,
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("セーブ情報を読み込み中…")
+                }
             }
         }
     }
@@ -519,10 +611,30 @@ private fun EditorScreen(
             Spacer(modifier = Modifier.height(topChromeVisibleHeightDp))
 
             if (state.message.isNotBlank()) {
-                Text(
-                    text = state.message,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                )
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (fileOperationBusy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .width(20.dp)
+                                    .height(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        }
+                        Text(text = state.message, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
 
             when (state.selectedTopTab) {
@@ -592,7 +704,23 @@ private fun EditorScreen(
                 .offset { androidx.compose.ui.unit.IntOffset(0, topChromeOffsetPx.roundToInt()) },
         ) {
             TopAppBar(
-                title = { Text("編集: ${state.selectedSection.removeSuffix(".yw")}") },
+                title = {
+                    Column {
+                        Text(
+                            text = sectionDisplayName(state.selectedSection),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = if (state.hasUnsavedChanges) "未保存の変更があります" else "保存済み",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (state.hasUnsavedChanges) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
@@ -614,16 +742,21 @@ private fun EditorScreen(
                     ) {
                         Text("リストア")
                     }
-                    IconButton(
+                    TextButton(
                         onClick = onSave,
                         enabled = shizukuGranted && state.loaded && !fileOperationBusy,
                     ) {
                         Icon(imageVector = Icons.Filled.Save, contentDescription = "保存")
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("保存")
                     }
                 },
             )
 
-            PrimaryTabRow(selectedTabIndex = state.selectedTopTab.ordinal) {
+            PrimaryScrollableTabRow(
+                selectedTabIndex = state.selectedTopTab.ordinal,
+                edgePadding = 8.dp,
+            ) {
                 EditorTopTab.entries.forEach { tab ->
                     Tab(
                         selected = state.selectedTopTab == tab,
@@ -945,6 +1078,16 @@ private fun formatDateTime(epochMillis: Long?): String {
     if (epochMillis == null) return "未取得"
     val formatter = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.JAPAN)
     return formatter.format(Date(epochMillis))
+}
+
+private fun sectionDisplayName(sectionName: String): String {
+    return when (sectionName) {
+        "game0.yw" -> "オートセーブ"
+        "game1.yw" -> "にっき1"
+        "game2.yw" -> "にっき2"
+        "game3.yw" -> "にっき3"
+        else -> sectionName.removeSuffix(".yw")
+    }
 }
 
 private fun formatDateForInput(epochMillis: Long): String {
