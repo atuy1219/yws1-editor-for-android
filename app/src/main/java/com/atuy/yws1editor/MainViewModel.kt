@@ -355,13 +355,23 @@ class MainViewModel : ViewModel() {
                                     gameData = current,
                                     entryIndex = item.index,
                                     newQuantity = item.quantity,
-                                    maximumQuantity = snapshot.safeItemQuantityCeilings[item.index]
-                                        ?: error("どうぐ[${item.index}]の安全上限がありません"),
+                                )
+                            }
+                        }
+                        val withEquipment = snapshot.equipmentItems.fold(withInventory) { current, item ->
+                            val originalOwnedCount = item.rawEntry.getOrNull(8)?.toInt()
+                            if (!item.isUsed || item.ownedCount == originalOwnedCount) {
+                                current
+                            } else {
+                                inventoryCodec.replaceEquipmentOwnedCount(
+                                    gameData = current,
+                                    entryIndex = item.index,
+                                    newOwnedCount = item.ownedCount,
                                 )
                             }
                         }
                         val writeResult = SaveInfoCodec.apply(
-                            baseGameData = withInventory,
+                            baseGameData = withEquipment,
                             baseHeadData = headSection.decryptedData,
                             sectionName = sectionName,
                             info = saveInfo,
@@ -590,15 +600,35 @@ class MainViewModel : ViewModel() {
     fun updateItemQuantity(entryIndex: Int, quantity: Int) {
         if (isFileOperationBusy()) return
         _uiState.update { state ->
-            val ceiling = state.safeItemQuantityCeilings[entryIndex] ?: return@update state
-            if (ceiling < 1) return@update state
-            val normalized = quantity.coerceIn(1, ceiling)
+            val normalized = quantity.coerceIn(0, 99)
             val updated = state.inventoryItems.map { item ->
                 if (item.index == entryIndex && item.isUsed) item.copy(quantity = normalized) else item
             }
             state.copy(
                 inventoryItems = updated,
                 hasUnsavedChanges = state.hasUnsavedChanges || updated != state.inventoryItems,
+            )
+        }
+    }
+
+    fun updateEquipmentOwnedCount(entryIndex: Int, ownedCount: Int) {
+        if (isFileOperationBusy()) return
+        _uiState.update { state ->
+            val normalized = ownedCount.coerceIn(0, 99)
+            val updated = state.equipmentItems.map { item ->
+                if (item.index == entryIndex && item.isUsed) {
+                    if (normalized < item.equippedCount) {
+                        item.copy(ownedCount = item.equippedCount)
+                    } else {
+                        item.copy(ownedCount = normalized)
+                    }
+                } else {
+                    item
+                }
+            }
+            state.copy(
+                equipmentItems = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.equipmentItems,
             )
         }
     }
@@ -1020,7 +1050,7 @@ class MainViewModel : ViewModel() {
     }
 
     private fun safeQuantityCeilings(items: List<InventoryItemEntry>): Map<Int, Int> {
-        return items.asSequence().filter { it.isUsed }.associate { it.index to it.quantity }
+        return items.asSequence().filter { it.isUsed }.associate { it.index to 99 }
     }
 
     private fun buildStartupSlots(decoded: MainBinDecoded): List<SaveSlotCard> {

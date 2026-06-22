@@ -332,6 +332,7 @@ private fun AppScreen(
                 mainViewModel.updateStat(slot, group, index, value)
             },
             onItemQuantityChange = mainViewModel::updateItemQuantity,
+            onEquipmentOwnedCountChange = mainViewModel::updateEquipmentOwnedCount,
             onPlayHoursChange = mainViewModel::updatePlayHours,
             onPlayMinutesChange = mainViewModel::updatePlayMinutes,
             onMoneyChange = mainViewModel::updateMoney,
@@ -562,6 +563,7 @@ private fun EditorScreen(
     onStateFlagChange: (Int, Int, Boolean) -> Unit,
     onStatChange: (Int, StatGroup, Int, Int) -> Unit,
     onItemQuantityChange: (Int, Int) -> Unit,
+    onEquipmentOwnedCountChange: (Int, Int) -> Unit,
     onPlayHoursChange: (Int) -> Unit,
     onPlayMinutesChange: (Int) -> Unit,
     onMoneyChange: (Int) -> Unit,
@@ -699,7 +701,6 @@ private fun EditorScreen(
                 EditorTopTab.Item -> ItemTabContent(
                     entries = state.inventoryItems,
                     names = state.itemNames,
-                    safeCeilings = state.safeItemQuantityCeilings,
                     enabled = !fileOperationBusy,
                     onQuantityChange = onItemQuantityChange,
                     modifier = Modifier.fillMaxSize(),
@@ -708,6 +709,8 @@ private fun EditorScreen(
                 EditorTopTab.Equipment -> EquipmentTabContent(
                     entries = state.equipmentItems,
                     names = state.equipmentNames,
+                    enabled = !fileOperationBusy,
+                    onOwnedCountChange = onEquipmentOwnedCountChange,
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -1161,7 +1164,6 @@ private fun PlaceholderTabContent(
 private fun ItemTabContent(
     entries: List<InventoryItemEntry>,
     names: Map<Long, String>,
-    safeCeilings: Map<Int, Int>,
     enabled: Boolean,
     onQuantityChange: (Int, Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -1180,7 +1182,7 @@ private fun ItemTabContent(
                     .padding(top = 12.dp),
             ) {
                 Text(
-                    text = "安全性を確認できる範囲として、数量は読込み時の値以下にだけ変更できます。新規追加・削除はできません。",
+                    text = "数量は0-99の範囲で編集できます。新規追加・削除はできません。",
                     modifier = Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1190,7 +1192,6 @@ private fun ItemTabContent(
             item { EmptyDomainText("所持しているどうぐはありません") }
         }
         items(used, key = { it.index }) { entry ->
-            val ceiling = safeCeilings[entry.index] ?: entry.quantity
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier
@@ -1210,12 +1211,12 @@ private fun ItemTabContent(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(
                             onClick = { onQuantityChange(entry.index, entry.quantity - 1) },
-                            enabled = enabled && entry.quantity > 1,
+                            enabled = enabled && entry.quantity > 0,
                         ) { Text("−") }
                         Text("${entry.quantity}", style = MaterialTheme.typography.titleMedium)
                         TextButton(
                             onClick = { onQuantityChange(entry.index, entry.quantity + 1) },
-                            enabled = enabled && entry.quantity < ceiling,
+                            enabled = enabled && entry.quantity < 99,
                         ) { Text("＋") }
                     }
                 }
@@ -1229,21 +1230,74 @@ private fun ItemTabContent(
 private fun EquipmentTabContent(
     entries: List<EquipmentEntry>,
     names: Map<Long, String>,
+    enabled: Boolean = true,
+    onOwnedCountChange: (Int, Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val used = entries.filter { it.isUsed }
-    ReadOnlyDomainList(
-        title = "そうびは読取り専用です。所持数が装備中数未満になる変更は安全性を確認できないため実装していません。",
-        emptyText = "所持しているそうびはありません",
-        values = used,
-        key = { it.index },
-        modifier = modifier,
-    ) { entry ->
-        DomainCard(
-            title = names[entry.itemId] ?: "ID ${formatU32(entry.itemId)}",
-            subtitle = "slot ${entry.index}  •  ${formatU32(entry.itemId)}",
-            detail = "所持 ${entry.ownedCount}  /  装備中 ${entry.equippedCount}",
-        )
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+            ) {
+                Text(
+                    text = "所持数は0-99の範囲で編集できます。装備中の数は編集できません。",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        if (used.isEmpty()) {
+            item { EmptyDomainText("所持しているそうびはありません") }
+        }
+        items(used, key = { it.index }) { entry ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(names[entry.itemId] ?: "ID ${formatU32(entry.itemId)}", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "slot ${entry.index}  •  ${formatU32(entry.itemId)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("所持")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(
+                                onClick = { onOwnedCountChange(entry.index, entry.ownedCount - 1) },
+                                enabled = enabled && entry.ownedCount > 0,
+                            ) { Text("−") }
+                            Text("${entry.ownedCount}", style = MaterialTheme.typography.titleMedium)
+                            TextButton(
+                                onClick = { onOwnedCountChange(entry.index, entry.ownedCount + 1) },
+                                enabled = enabled && entry.ownedCount < 99,
+                            ) { Text("＋") }
+                        }
+                    }
+                    Text(
+                        "装備中: ${entry.equippedCount}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        item { Spacer(Modifier.height(12.dp)) }
     }
 }
 
