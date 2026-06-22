@@ -724,6 +724,7 @@ private fun EditorScreen(
 
                 EditorTopTab.Sasurai -> SasuraiTabContent(
                     residents = state.sasuraiResidents,
+                    yokaiNames = yokaiOptions.associate { it.id to it.name },
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -1286,7 +1287,11 @@ private fun GashaTabContent(entries: List<GashaStateEntry>, modifier: Modifier =
 }
 
 @Composable
-private fun SasuraiTabContent(residents: List<SasuraiResident>, modifier: Modifier = Modifier) {
+private fun SasuraiTabContent(
+    residents: List<SasuraiResident>,
+    yokaiNames: Map<Long, String>,
+    modifier: Modifier = Modifier,
+) {
     val used = residents.filter { it.isUsed }
     ReadOnlyDomainList(
         title = "さすらい荘は読取り専用です。生成・編集・削除は行いません。",
@@ -1295,13 +1300,15 @@ private fun SasuraiTabContent(residents: List<SasuraiResident>, modifier: Modifi
         key = { it.index },
         modifier = modifier,
     ) { resident ->
-        val yokaiIds = resident.yokai.filter { it.yokaiId != 0L }
-            .joinToString("  ") { formatU32(it.yokaiId) }
+        val yokaiLabels = resident.yokai.filter { it.yokaiId != 0L }
+            .joinToString("  ") { summary ->
+                yokaiNames[summary.yokaiId] ?: "不明な妖怪(${formatU32(summary.yokaiId)})"
+            }
             .ifBlank { "なし" }
         DomainCard(
             title = resident.displayName.ifBlank { "住人 ${resident.index + 1}" },
             subtitle = "sequence ${resident.sequence}  •  state ${formatU16(resident.state)}",
-            detail = "encounter ${formatU32(resident.encounterId)}\n妖怪ID $yokaiIds",
+            detail = "encounter ${formatU32(resident.encounterId)}\n妖怪 $yokaiLabels",
         )
     }
 }

@@ -18,10 +18,10 @@ object SaveDomainMasterLoader {
 
     fun load(context: Context): SaveDomainMasterData {
         return SaveDomainMasterData(
-            itemNames = loadNames(context, R.raw.consume_ja_jp),
+            itemNames = loadNames(context, R.raw.consume_ja_jp) +
+                loadNames(context, R.raw.creature_ja_jp),
             equipmentNames = loadNames(context, R.raw.equipment_ja_jp),
-            // The repository does not currently include an authoritative smartphone key-item table.
-            keyItemNames = emptyMap(),
+            keyItemNames = loadNames(context, R.raw.important_ja_jp),
         )
     }
 
