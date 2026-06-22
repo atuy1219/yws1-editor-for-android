@@ -23,6 +23,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 
 ## app/src/main/res/raw/youkai_ja.xml
+## app/src/main/res/raw/equipment_ja_JP.xml
+## app/src/main/res/raw/consume_ja_JP.xml
+## app/src/main/res/raw/creature_ja_JP.xml
 
 - Copyright: (c) 2016 togenyan
 - License: MIT
