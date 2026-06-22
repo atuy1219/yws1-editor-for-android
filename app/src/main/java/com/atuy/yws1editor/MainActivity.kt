@@ -78,6 +78,12 @@ import androidx.lifecycle.lifecycleScope
 import com.atuy.yws1editor.ui.theme.YwEditorTheme
 import com.atuy.yws1editor.shizuku.ShizukuFileServiceClient
 import com.atuy.yws1editor.yokai.MainBinBackupInfo
+import com.atuy.yws1editor.yokai.InventoryItemEntry
+import com.atuy.yws1editor.yokai.EquipmentEntry
+import com.atuy.yws1editor.yokai.KeyItemEntry
+import com.atuy.yws1editor.yokai.GashaStateEntry
+import com.atuy.yws1editor.yokai.SasuraiResident
+import com.atuy.yws1editor.yokai.SaveDomainMasterLoader
 import com.atuy.yws1editor.yokai.SaveInfoCodec
 import com.atuy.yws1editor.yokai.ShizukuFileGateway
 import com.atuy.yws1editor.yokai.Stat5
@@ -204,10 +210,12 @@ class MainActivity : ComponentActivity() {
         Shizuku.addBinderDeadListener(binderDeadListener)
         Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
         lifecycleScope.launch {
-            val masterData = withContext(Dispatchers.IO) {
-                YokaiMasterLoader.load(this@MainActivity)
+            val (masterData, saveDomainMasterData) = withContext(Dispatchers.IO) {
+                YokaiMasterLoader.load(this@MainActivity) to
+                    SaveDomainMasterLoader.load(this@MainActivity)
             }
             vm.setMasterData(masterData)
+            vm.setSaveDomainMasterData(saveDomainMasterData)
         }
         enableEdgeToEdge()
         setContent {
@@ -323,6 +331,7 @@ private fun AppScreen(
             onStatChange = { slot, group, index, value ->
                 mainViewModel.updateStat(slot, group, index, value)
             },
+            onItemQuantityChange = mainViewModel::updateItemQuantity,
             onPlayHoursChange = mainViewModel::updatePlayHours,
             onPlayMinutesChange = mainViewModel::updatePlayMinutes,
             onMoneyChange = mainViewModel::updateMoney,
@@ -552,6 +561,7 @@ private fun EditorScreen(
     onMajimeCorrectionChange: (Int, Int) -> Unit,
     onStateFlagChange: (Int, Int, Boolean) -> Unit,
     onStatChange: (Int, StatGroup, Int, Int) -> Unit,
+    onItemQuantityChange: (Int, Int) -> Unit,
     onPlayHoursChange: (Int) -> Unit,
     onPlayMinutesChange: (Int) -> Unit,
     onMoneyChange: (Int) -> Unit,
@@ -684,6 +694,37 @@ private fun EditorScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(12.dp),
+                )
+
+                EditorTopTab.Item -> ItemTabContent(
+                    entries = state.inventoryItems,
+                    names = state.itemNames,
+                    safeCeilings = state.safeItemQuantityCeilings,
+                    enabled = !fileOperationBusy,
+                    onQuantityChange = onItemQuantityChange,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                EditorTopTab.Equipment -> EquipmentTabContent(
+                    entries = state.equipmentItems,
+                    names = state.equipmentNames,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                EditorTopTab.KeyItem -> KeyItemTabContent(
+                    entries = state.keyItems,
+                    names = state.keyItemNames,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                EditorTopTab.Gasha -> GashaTabContent(
+                    entries = state.gashaStates,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                EditorTopTab.Sasurai -> SasuraiTabContent(
+                    residents = state.sasuraiResidents,
+                    modifier = Modifier.fillMaxSize(),
                 )
 
                 else -> PlaceholderTabContent(
@@ -1114,6 +1155,217 @@ private fun PlaceholderTabContent(
         Text("${tab.label}は未実装です")
     }
 }
+
+@Composable
+private fun ItemTabContent(
+    entries: List<InventoryItemEntry>,
+    names: Map<Long, String>,
+    safeCeilings: Map<Int, Int>,
+    enabled: Boolean,
+    onQuantityChange: (Int, Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val used = entries.filter { it.isUsed }
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+            ) {
+                Text(
+                    text = "安全性を確認できる範囲として、数量は読込み時の値以下にだけ変更できます。新規追加・削除はできません。",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        if (used.isEmpty()) {
+            item { EmptyDomainText("所持しているどうぐはありません") }
+        }
+        items(used, key = { it.index }) { entry ->
+            val ceiling = safeCeilings[entry.index] ?: entry.quantity
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(names[entry.itemId] ?: "ID ${formatU32(entry.itemId)}", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "slot ${entry.index}  •  ${formatU32(entry.itemId)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            onClick = { onQuantityChange(entry.index, entry.quantity - 1) },
+                            enabled = enabled && entry.quantity > 1,
+                        ) { Text("−") }
+                        Text("${entry.quantity}", style = MaterialTheme.typography.titleMedium)
+                        TextButton(
+                            onClick = { onQuantityChange(entry.index, entry.quantity + 1) },
+                            enabled = enabled && entry.quantity < ceiling,
+                        ) { Text("＋") }
+                    }
+                }
+            }
+        }
+        item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+@Composable
+private fun EquipmentTabContent(
+    entries: List<EquipmentEntry>,
+    names: Map<Long, String>,
+    modifier: Modifier = Modifier,
+) {
+    val used = entries.filter { it.isUsed }
+    ReadOnlyDomainList(
+        title = "そうびは読取り専用です。所持数が装備中数未満になる変更は安全性を確認できないため実装していません。",
+        emptyText = "所持しているそうびはありません",
+        values = used,
+        key = { it.index },
+        modifier = modifier,
+    ) { entry ->
+        DomainCard(
+            title = names[entry.itemId] ?: "ID ${formatU32(entry.itemId)}",
+            subtitle = "slot ${entry.index}  •  ${formatU32(entry.itemId)}",
+            detail = "所持 ${entry.ownedCount}  /  装備中 ${entry.equippedCount}",
+        )
+    }
+}
+
+@Composable
+private fun KeyItemTabContent(
+    entries: List<KeyItemEntry>,
+    names: Map<Long, String>,
+    modifier: Modifier = Modifier,
+) {
+    val used = entries.filter { it.isUsed }
+    ReadOnlyDomainList(
+        title = "だいじなものは読取り専用です。追加・削除は関連flagが未確定のため実装していません。",
+        emptyText = "所持しているだいじなものはありません",
+        values = used,
+        key = { it.index },
+        modifier = modifier,
+    ) { entry ->
+        DomainCard(
+            title = names[entry.itemId] ?: "ID ${formatU32(entry.itemId)}",
+            subtitle = "slot ${entry.index}",
+            detail = "ID ${formatU32(entry.itemId)}",
+        )
+    }
+}
+
+@Composable
+private fun GashaTabContent(entries: List<GashaStateEntry>, modifier: Modifier = Modifier) {
+    ReadOnlyDomainList(
+        title = "ガシャstateは読取り専用です。各slotの4ワードをraw値で表示します。",
+        emptyText = "ガシャstateを読み込めませんでした",
+        values = entries,
+        key = { it.index },
+        modifier = modifier,
+    ) { entry ->
+        DomainCard(
+            title = "state ${entry.index}",
+            subtitle = entry.words.joinToString("  ") { formatU32(it) },
+            detail = null,
+        )
+    }
+}
+
+@Composable
+private fun SasuraiTabContent(residents: List<SasuraiResident>, modifier: Modifier = Modifier) {
+    val used = residents.filter { it.isUsed }
+    ReadOnlyDomainList(
+        title = "さすらい荘は読取り専用です。生成・編集・削除は行いません。",
+        emptyText = "さすらい荘に住人はいません",
+        values = used,
+        key = { it.index },
+        modifier = modifier,
+    ) { resident ->
+        val yokaiIds = resident.yokai.filter { it.yokaiId != 0L }
+            .joinToString("  ") { formatU32(it.yokaiId) }
+            .ifBlank { "なし" }
+        DomainCard(
+            title = resident.displayName.ifBlank { "住人 ${resident.index + 1}" },
+            subtitle = "sequence ${resident.sequence}  •  state ${formatU16(resident.state)}",
+            detail = "encounter ${formatU32(resident.encounterId)}\n妖怪ID $yokaiIds",
+        )
+    }
+}
+
+@Composable
+private fun <T> ReadOnlyDomainList(
+    title: String,
+    emptyText: String,
+    values: List<T>,
+    key: (T) -> Any,
+    modifier: Modifier = Modifier,
+    content: @Composable (T) -> Unit,
+) {
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+            ) {
+                Text(title, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (values.isEmpty()) item { EmptyDomainText(emptyText) }
+        items(values, key = key) { content(it) }
+        item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+@Composable
+private fun DomainCard(title: String, subtitle: String, detail: String?) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (detail != null) Text(detail, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun EmptyDomainText(text: String) {
+    Text(
+        text,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(24.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+private fun formatU32(value: Long): String = "0x%08X".format(Locale.ROOT, value and 0xffffffffL)
+
+private fun formatU16(value: Int): String = "0x%04X".format(Locale.ROOT, value and 0xffff)
 
 @Composable
 private fun YokaiTabContent(

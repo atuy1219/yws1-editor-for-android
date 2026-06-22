@@ -5,6 +5,15 @@ import androidx.lifecycle.viewModelScope
 import com.atuy.yws1editor.yokai.MainBinCodec
 import com.atuy.yws1editor.yokai.MainBinBackupInfo
 import com.atuy.yws1editor.yokai.MainBinDecoded
+import com.atuy.yws1editor.yokai.InventoryCodec
+import com.atuy.yws1editor.yokai.InventoryItemEntry
+import com.atuy.yws1editor.yokai.EquipmentEntry
+import com.atuy.yws1editor.yokai.KeyItemEntry
+import com.atuy.yws1editor.yokai.GashaStateCodec
+import com.atuy.yws1editor.yokai.GashaStateEntry
+import com.atuy.yws1editor.yokai.SasuraiCodec
+import com.atuy.yws1editor.yokai.SasuraiResident
+import com.atuy.yws1editor.yokai.SaveDomainMasterData
 import com.atuy.yws1editor.yokai.SaveInfo
 import com.atuy.yws1editor.yokai.SaveInfoCodec
 import com.atuy.yws1editor.yokai.Stat5
@@ -34,6 +43,8 @@ enum class EditorTopTab(val label: String) {
     Item("どうぐ"),
     Equipment("そうび"),
     KeyItem("だいじなもの"),
+    Gasha("ガシャ"),
+    Sasurai("さすらい荘"),
     Info("情報"),
     Encyclopedia("妖怪大辞典"),
 }
@@ -92,6 +103,15 @@ data class EditorUiState(
     val startupSlotsLoaded: Boolean = false,
     val isCheatMode: Boolean = false,
     val hasUnsavedChanges: Boolean = false,
+    val inventoryItems: List<InventoryItemEntry> = emptyList(),
+    val equipmentItems: List<EquipmentEntry> = emptyList(),
+    val keyItems: List<KeyItemEntry> = emptyList(),
+    val gashaStates: List<GashaStateEntry> = emptyList(),
+    val sasuraiResidents: List<SasuraiResident> = emptyList(),
+    val itemNames: Map<Long, String> = emptyMap(),
+    val equipmentNames: Map<Long, String> = emptyMap(),
+    val keyItemNames: Map<Long, String> = emptyMap(),
+    val safeItemQuantityCeilings: Map<Int, Int> = emptyMap(),
 )
 
 class MainViewModel : ViewModel() {
@@ -122,13 +142,28 @@ class MainViewModel : ViewModel() {
 
     private val gateway = ShizukuFileGateway()
     private val codec = MainBinCodec()
+    private val inventoryCodec = InventoryCodec()
+    private val gashaCodec = GashaStateCodec()
+    private val sasuraiCodec = SasuraiCodec()
     private var masterData = YokaiMasterData.EMPTY
+    private var saveDomainMasterData = SaveDomainMasterData.EMPTY
     private var parser = YokaiParser(masterData)
 
     private var decodedMainBin: MainBinDecoded? = null
     private val fileOperationMutex = Mutex()
     private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
+
+    fun setSaveDomainMasterData(data: SaveDomainMasterData) {
+        saveDomainMasterData = data
+        _uiState.update {
+            it.copy(
+                itemNames = data.itemNames,
+                equipmentNames = data.equipmentNames,
+                keyItemNames = data.keyItemNames,
+            )
+        }
+    }
 
     fun setMasterData(data: YokaiMasterData) {
         viewModelScope.launch {
@@ -195,6 +230,12 @@ class MainViewModel : ViewModel() {
                             loading = false,
                             loaded = false,
                             entries = emptyList(),
+                            inventoryItems = emptyList(),
+                            equipmentItems = emptyList(),
+                            keyItems = emptyList(),
+                            gashaStates = emptyList(),
+                            sasuraiResidents = emptyList(),
+                            safeItemQuantityCeilings = emptyMap(),
                             expandedYokaiSlot = null,
                             selectedSlot = null,
                             startupSaveSlots = DEFAULT_STARTUP_SLOTS,
@@ -305,8 +346,22 @@ class MainViewModel : ViewModel() {
                             saveMinute = snapshot.saveMinute,
                         )
                         val withYokai = parser.applyEntries(section.decryptedData, snapshot.entries)
+                        val withInventory = snapshot.inventoryItems.fold(withYokai) { current, item ->
+                            val originalQuantity = item.rawEntry.getOrNull(8)?.toInt()
+                            if (!item.isUsed || item.quantity == originalQuantity) {
+                                current
+                            } else {
+                                inventoryCodec.replaceItemQuantity(
+                                    gameData = current,
+                                    entryIndex = item.index,
+                                    newQuantity = item.quantity,
+                                    maximumQuantity = snapshot.safeItemQuantityCeilings[item.index]
+                                        ?: error("どうぐ[${item.index}]の安全上限がありません"),
+                                )
+                            }
+                        }
                         val writeResult = SaveInfoCodec.apply(
-                            baseGameData = withYokai,
+                            baseGameData = withInventory,
                             baseHeadData = headSection.decryptedData,
                             sectionName = sectionName,
                             info = saveInfo,
@@ -350,6 +405,12 @@ class MainViewModel : ViewModel() {
                     selectedSection = sectionName,
                     loaded = false,
                     entries = emptyList(),
+                    inventoryItems = emptyList(),
+                    equipmentItems = emptyList(),
+                    keyItems = emptyList(),
+                    gashaStates = emptyList(),
+                    sasuraiResidents = emptyList(),
+                    safeItemQuantityCeilings = emptyMap(),
                     expandedYokaiSlot = null,
                     selectedSlot = null,
                     message = "$sectionName は main.bin 内に見つかりません",
@@ -359,6 +420,7 @@ class MainViewModel : ViewModel() {
         }
 
         val entries = parser.parse(target.decryptedData)
+        val domains = parseSaveDomains(target.decryptedData)
         val headSection = decoded.sections["head.yw"]
         val saveInfo = headSection?.let {
             SaveInfoCodec.parse(target.decryptedData, it.decryptedData, sectionName)
@@ -368,6 +430,12 @@ class MainViewModel : ViewModel() {
                 selectedSection = sectionName,
                 loaded = true,
                 entries = entries,
+                inventoryItems = domains.inventoryItems,
+                equipmentItems = domains.equipmentItems,
+                keyItems = domains.keyItems,
+                gashaStates = domains.gashaStates,
+                sasuraiResidents = domains.sasuraiResidents,
+                safeItemQuantityCeilings = safeQuantityCeilings(domains.inventoryItems),
                 attitudes = masterData.attitudes,
                 expandedYokaiSlot = null,
                 selectedSlot = entries.firstOrNull()?.slot,
@@ -517,6 +585,22 @@ class MainViewModel : ViewModel() {
 
     fun select(slot: Int) {
         _uiState.update { it.copy(selectedSlot = slot) }
+    }
+
+    fun updateItemQuantity(entryIndex: Int, quantity: Int) {
+        if (isFileOperationBusy()) return
+        _uiState.update { state ->
+            val ceiling = state.safeItemQuantityCeilings[entryIndex] ?: return@update state
+            if (ceiling < 1) return@update state
+            val normalized = quantity.coerceIn(1, ceiling)
+            val updated = state.inventoryItems.map { item ->
+                if (item.index == entryIndex && item.isUsed) item.copy(quantity = normalized) else item
+            }
+            state.copy(
+                inventoryItems = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.inventoryItems,
+            )
+        }
     }
 
     fun setCheatMode(enabled: Boolean) {
@@ -840,6 +924,7 @@ class MainViewModel : ViewModel() {
         val section = decoded.sections[sectionName] ?: error("$sectionName が見つかりません")
         val headSection = decoded.sections["head.yw"] ?: error("head.yw が見つかりません")
         val entries = parser.parse(section.decryptedData)
+        val domains = parseSaveDomains(section.decryptedData)
         val saveInfo = SaveInfoCodec.parse(
             section.decryptedData,
             headSection.decryptedData,
@@ -848,6 +933,7 @@ class MainViewModel : ViewModel() {
         return LoadedData(
             decoded = decoded,
             entries = entries,
+            domains = domains,
             saveInfo = saveInfo,
             startupSlots = buildStartupSlots(decoded),
             backupItems = gateway.listManagedBackups(path),
@@ -862,6 +948,15 @@ class MainViewModel : ViewModel() {
                 backupsRestoring = false,
                 loaded = true,
                 entries = loadedData.entries,
+                inventoryItems = loadedData.domains.inventoryItems,
+                equipmentItems = loadedData.domains.equipmentItems,
+                keyItems = loadedData.domains.keyItems,
+                gashaStates = loadedData.domains.gashaStates,
+                sasuraiResidents = loadedData.domains.sasuraiResidents,
+                itemNames = saveDomainMasterData.itemNames,
+                equipmentNames = saveDomainMasterData.equipmentNames,
+                keyItemNames = saveDomainMasterData.keyItemNames,
+                safeItemQuantityCeilings = safeQuantityCeilings(loadedData.domains.inventoryItems),
                 attitudes = masterData.attitudes,
                 expandedYokaiSlot = null,
                 selectedSlot = loadedData.entries.firstOrNull()?.slot,
@@ -913,6 +1008,21 @@ class MainViewModel : ViewModel() {
             .map { (id, name) -> YokaiOption(id = id, name = name) }
     }
 
+    private fun parseSaveDomains(gameData: ByteArray): SaveDomains {
+        val inventory = inventoryCodec.decode(gameData)
+        return SaveDomains(
+            inventoryItems = inventory.items,
+            equipmentItems = inventory.equipment,
+            keyItems = inventory.keyItems,
+            gashaStates = gashaCodec.decode(gameData),
+            sasuraiResidents = sasuraiCodec.decode(gameData),
+        )
+    }
+
+    private fun safeQuantityCeilings(items: List<InventoryItemEntry>): Map<Int, Int> {
+        return items.asSequence().filter { it.isUsed }.associate { it.index to it.quantity }
+    }
+
     private fun buildStartupSlots(decoded: MainBinDecoded): List<SaveSlotCard> {
         return DEFAULT_STARTUP_SLOTS.map { base ->
             val section = decoded.sections[base.sectionName]
@@ -954,9 +1064,18 @@ class MainViewModel : ViewModel() {
 private data class LoadedData(
     val decoded: MainBinDecoded,
     val entries: List<YokaiEntry>,
+    val domains: SaveDomains,
     val saveInfo: SaveInfo,
     val startupSlots: List<SaveSlotCard>,
     val backupItems: List<MainBinBackupInfo>,
+)
+
+private data class SaveDomains(
+    val inventoryItems: List<InventoryItemEntry>,
+    val equipmentItems: List<EquipmentEntry>,
+    val keyItems: List<KeyItemEntry>,
+    val gashaStates: List<GashaStateEntry>,
+    val sasuraiResidents: List<SasuraiResident>,
 )
 
 private data class StartupLoadData(
