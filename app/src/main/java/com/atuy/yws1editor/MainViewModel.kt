@@ -12,6 +12,7 @@ import com.atuy.yws1editor.yokai.KeyItemEntry
 import com.atuy.yws1editor.yokai.GashaStateCodec
 import com.atuy.yws1editor.yokai.GashaStateEntry
 import com.atuy.yws1editor.yokai.SasuraiCodec
+import com.atuy.yws1editor.yokai.SasuraiEncounterOption
 import com.atuy.yws1editor.yokai.SasuraiResident
 import com.atuy.yws1editor.yokai.SaveDomainMasterData
 import com.atuy.yws1editor.yokai.SaveInfo
@@ -108,6 +109,7 @@ data class EditorUiState(
     val keyItems: List<KeyItemEntry> = emptyList(),
     val gashaStates: List<GashaStateEntry> = emptyList(),
     val sasuraiResidents: List<SasuraiResident> = emptyList(),
+    val sasuraiEncounterOptions: List<SasuraiEncounterOption> = emptyList(),
     val itemNames: Map<Long, String> = emptyMap(),
     val equipmentNames: Map<Long, String> = emptyMap(),
     val keyItemNames: Map<Long, String> = emptyMap(),
@@ -161,6 +163,7 @@ class MainViewModel : ViewModel() {
                 itemNames = data.itemNames,
                 equipmentNames = data.equipmentNames,
                 keyItemNames = data.keyItemNames,
+                sasuraiEncounterOptions = data.sasuraiEncounterOptions,
             )
         }
     }
@@ -360,8 +363,19 @@ class MainViewModel : ViewModel() {
                                 )
                             }
                         }
+                        val withSasurai = snapshot.sasuraiResidents.fold(withInventory) { current, resident ->
+                            if (!resident.isUsed) {
+                                current
+                            } else {
+                                sasuraiCodec.replaceResidentEntry(
+                                    gameData = current,
+                                    index = resident.index,
+                                    rawEntry = resident.rawEntry,
+                                )
+                            }
+                        }
                         val writeResult = SaveInfoCodec.apply(
-                            baseGameData = withInventory,
+                            baseGameData = withSasurai,
                             baseHeadData = headSection.decryptedData,
                             sectionName = sectionName,
                             info = saveInfo,
@@ -599,6 +613,26 @@ class MainViewModel : ViewModel() {
             state.copy(
                 inventoryItems = updated,
                 hasUnsavedChanges = state.hasUnsavedChanges || updated != state.inventoryItems,
+            )
+        }
+    }
+
+    fun updateSasuraiEncounter(residentIndex: Int, encounterId: Long) {
+        if (isFileOperationBusy()) return
+        _uiState.update { state ->
+            val option = state.sasuraiEncounterOptions.firstOrNull { it.encounterId == encounterId }
+                ?: return@update state
+            val updated = state.sasuraiResidents.map { resident ->
+                if (resident.index == residentIndex && resident.isUsed) {
+                    sasuraiCodec.replaceEncounter(resident, option)
+                } else {
+                    resident
+                }
+            }
+            state.copy(
+                sasuraiResidents = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges ||
+                    updated.map { it.encounterId } != state.sasuraiResidents.map { it.encounterId },
             )
         }
     }
@@ -953,6 +987,7 @@ class MainViewModel : ViewModel() {
                 keyItems = loadedData.domains.keyItems,
                 gashaStates = loadedData.domains.gashaStates,
                 sasuraiResidents = loadedData.domains.sasuraiResidents,
+                sasuraiEncounterOptions = saveDomainMasterData.sasuraiEncounterOptions,
                 itemNames = saveDomainMasterData.itemNames,
                 equipmentNames = saveDomainMasterData.equipmentNames,
                 keyItemNames = saveDomainMasterData.keyItemNames,

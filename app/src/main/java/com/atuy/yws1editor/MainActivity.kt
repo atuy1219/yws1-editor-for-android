@@ -82,6 +82,7 @@ import com.atuy.yws1editor.yokai.InventoryItemEntry
 import com.atuy.yws1editor.yokai.EquipmentEntry
 import com.atuy.yws1editor.yokai.KeyItemEntry
 import com.atuy.yws1editor.yokai.GashaStateEntry
+import com.atuy.yws1editor.yokai.SasuraiEncounterOption
 import com.atuy.yws1editor.yokai.SasuraiResident
 import com.atuy.yws1editor.yokai.SaveDomainMasterLoader
 import com.atuy.yws1editor.yokai.SaveInfoCodec
@@ -332,6 +333,7 @@ private fun AppScreen(
                 mainViewModel.updateStat(slot, group, index, value)
             },
             onItemQuantityChange = mainViewModel::updateItemQuantity,
+            onSasuraiEncounterChange = mainViewModel::updateSasuraiEncounter,
             onPlayHoursChange = mainViewModel::updatePlayHours,
             onPlayMinutesChange = mainViewModel::updatePlayMinutes,
             onMoneyChange = mainViewModel::updateMoney,
@@ -562,6 +564,7 @@ private fun EditorScreen(
     onStateFlagChange: (Int, Int, Boolean) -> Unit,
     onStatChange: (Int, StatGroup, Int, Int) -> Unit,
     onItemQuantityChange: (Int, Int) -> Unit,
+    onSasuraiEncounterChange: (Int, Long) -> Unit,
     onPlayHoursChange: (Int) -> Unit,
     onPlayMinutesChange: (Int) -> Unit,
     onMoneyChange: (Int) -> Unit,
@@ -724,7 +727,10 @@ private fun EditorScreen(
 
                 EditorTopTab.Sasurai -> SasuraiTabContent(
                     residents = state.sasuraiResidents,
+                    encounterOptions = state.sasuraiEncounterOptions,
                     yokaiNames = yokaiOptions.associate { it.id to it.name },
+                    enabled = !fileOperationBusy,
+                    onEncounterChange = onSasuraiEncounterChange,
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -1289,28 +1295,109 @@ private fun GashaTabContent(entries: List<GashaStateEntry>, modifier: Modifier =
 @Composable
 private fun SasuraiTabContent(
     residents: List<SasuraiResident>,
+    encounterOptions: List<SasuraiEncounterOption>,
     yokaiNames: Map<Long, String>,
+    enabled: Boolean,
+    onEncounterChange: (Int, Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val used = residents.filter { it.isUsed }
     ReadOnlyDomainList(
-        title = "さすらい荘は読取り専用です。生成・編集・削除は行いません。",
+        title = "既存住人の encounterId と妖怪IDのみ切り替えます。生成・削除は行いません。",
         emptyText = "さすらい荘に住人はいません",
         values = used,
         key = { it.index },
         modifier = modifier,
     ) { resident ->
+        val option = encounterOptions.firstOrNull { it.encounterId == resident.encounterId }
+        val representativeName = option?.representativeName
+            ?: resident.yokai.getOrNull(1)?.yokaiId?.let { yokaiNames[it] }
+            ?: "住人 ${resident.index + 1}"
         val yokaiLabels = resident.yokai.filter { it.yokaiId != 0L }
             .joinToString("  ") { summary ->
                 yokaiNames[summary.yokaiId] ?: "不明な妖怪(${formatU32(summary.yokaiId)})"
             }
             .ifBlank { "なし" }
-        DomainCard(
-            title = resident.displayName.ifBlank { "住人 ${resident.index + 1}" },
-            subtitle = "sequence ${resident.sequence}  •  state ${formatU16(resident.state)}",
-            detail = "encounter ${formatU32(resident.encounterId)}\n妖怪 $yokaiLabels",
-        )
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(representativeName, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "slot ${resident.index + 1}  •  sequence ${resident.sequence}  •  state ${formatU16(resident.state)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SasuraiEncounterDropdown(
+                    options = encounterOptions,
+                    selectedEncounterId = resident.encounterId,
+                    enabled = enabled,
+                    onSelected = { onEncounterChange(resident.index, it) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "妖怪 $yokaiLabels",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SasuraiEncounterDropdown(
+    options: List<SasuraiEncounterOption>,
+    selectedEncounterId: Long,
+    enabled: Boolean,
+    onSelected: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = options.firstOrNull { it.encounterId == selectedEncounterId }
+    val selectedLabel = selected?.let { sasuraiEncounterLabel(it) }
+        ?: "未登録 ${formatU32(selectedEncounterId)}"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled) expanded = !expanded },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            enabled = enabled,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = enabled)
+                .fillMaxWidth(),
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(sasuraiEncounterLabel(option)) },
+                    onClick = {
+                        onSelected(option.encounterId)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun sasuraiEncounterLabel(option: SasuraiEncounterOption): String {
+    val members = option.yokaiNames.filter { it.isNotBlank() }.joinToString(" / ")
+    return "${option.representativeName}  ($members)"
 }
 
 @Composable

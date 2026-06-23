@@ -7,6 +7,14 @@ data class SasuraiYokaiSummary(
     val rawSummary: ByteArray,
 )
 
+data class SasuraiEncounterOption(
+    val encounterId: Long,
+    val representativeYokaiId: Long,
+    val representativeName: String,
+    val yokaiIds: List<Long>,
+    val yokaiNames: List<String>,
+)
+
 data class SasuraiResident(
     val index: Int,
     val isUsed: Boolean,
@@ -70,10 +78,74 @@ class SasuraiCodec {
         }
     }
 
+    fun replaceResidentEntry(gameData: ByteArray, index: Int, rawEntry: ByteArray): ByteArray {
+        requireResidentIndex(index)
+        if (rawEntry.size != STRIDE) {
+            throw java.io.IOException("さすらい荘entryサイズが不正です")
+        }
+        SaveDataBinary.requireRange(gameData, OFFSET, REGION_SIZE, "さすらい荘領域")
+        val out = gameData.copyOf()
+        rawEntry.copyInto(out, OFFSET + index * STRIDE)
+        return out
+    }
+
+    fun replaceEncounter(resident: SasuraiResident, option: SasuraiEncounterOption): SasuraiResident {
+        requireResidentIndex(resident.index)
+        if (!resident.isUsed) return resident
+        if (resident.encounterId == option.encounterId) return resident
+
+        val raw = resident.rawEntry.copyOf()
+        writeUInt32Le(raw, ENCOUNTER_ID_FIELD, option.encounterId)
+        YOKAI_FIELDS.forEachIndexed { index, relative ->
+            val yokaiId = option.yokaiIds.getOrNull(index) ?: 0L
+            writeUInt32Le(raw, relative + YOKAI_ID_FIELD, yokaiId)
+        }
+
+        return decodeResident(resident.index, raw)
+    }
+
+    private fun decodeResident(index: Int, rawEntry: ByteArray): SasuraiResident {
+        if (rawEntry.size != STRIDE) {
+            throw java.io.IOException("さすらい荘entryサイズが不正です")
+        }
+        val summaries = YOKAI_FIELDS.map { relative ->
+            SasuraiYokaiSummary(
+                nickname = readNullTerminatedUtf8(rawEntry, relative + YOKAI_NAME_FIELD, YOKAI_NAME_SIZE),
+                equipmentConfigId = SaveDataBinary.readUInt32Le(rawEntry, relative + YOKAI_EQUIPMENT_FIELD),
+                yokaiId = SaveDataBinary.readUInt32Le(rawEntry, relative + YOKAI_ID_FIELD),
+                rawSummary = rawEntry.copyOfRange(relative, relative + YOKAI_SIZE),
+            )
+        }
+        return SasuraiResident(
+            index = index,
+            isUsed = SaveDataBinary.readUInt32Le(rawEntry, 0) != 0L,
+            sequence = SaveDataBinary.readUInt16Le(rawEntry, SEQUENCE_FIELD),
+            state = SaveDataBinary.readUInt16Le(rawEntry, STATE_FIELD),
+            encounterId = SaveDataBinary.readUInt32Le(rawEntry, ENCOUNTER_ID_FIELD),
+            displayName = readNullTerminatedUtf8(rawEntry, DISPLAY_NAME_FIELD, DISPLAY_NAME_SIZE),
+            yokai = summaries,
+            statusByte = rawEntry[STATUS_FIELD].toInt() and 0xff,
+            rawEntry = rawEntry.copyOf(),
+        )
+    }
+
     private fun readNullTerminatedUtf8(data: ByteArray, offset: Int, size: Int): String {
         SaveDataBinary.requireRange(data, offset, size, "文字列")
         var end = offset
         while (end < offset + size && data[end] != 0.toByte()) end++
         return data.copyOfRange(offset, end).toString(Charsets.UTF_8)
+    }
+
+    private fun requireResidentIndex(index: Int) {
+        if (index !in 0 until ENTRY_COUNT) {
+            throw java.io.IOException("さすらい荘entry indexが不正です")
+        }
+    }
+
+    private fun writeUInt32Le(data: ByteArray, offset: Int, value: Long) {
+        SaveDataBinary.requireRange(data, offset, 4, "u32")
+        repeat(4) { index ->
+            data[offset + index] = ((value ushr (index * 8)) and 0xff).toByte()
+        }
     }
 }
