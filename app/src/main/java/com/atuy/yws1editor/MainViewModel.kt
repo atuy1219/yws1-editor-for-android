@@ -11,6 +11,8 @@ import com.atuy.yws1editor.yokai.EquipmentEntry
 import com.atuy.yws1editor.yokai.KeyItemEntry
 import com.atuy.yws1editor.yokai.GashaStateCodec
 import com.atuy.yws1editor.yokai.GashaStateEntry
+import com.atuy.yws1editor.yokai.GashaPredictor
+import com.atuy.yws1editor.yokai.GashaPrizeEntry
 import com.atuy.yws1editor.yokai.SasuraiCodec
 import com.atuy.yws1editor.yokai.SasuraiEncounterOption
 import com.atuy.yws1editor.yokai.SasuraiResident
@@ -113,6 +115,7 @@ data class EditorUiState(
     val equipmentItems: List<EquipmentEntry> = emptyList(),
     val keyItems: List<KeyItemEntry> = emptyList(),
     val gashaStates: List<GashaStateEntry> = emptyList(),
+    val gashaPrizeEntries: List<GashaPrizeEntry> = emptyList(),
     val sasuraiResidents: List<SasuraiResident> = emptyList(),
     val sasuraiEncounterOptions: List<SasuraiEncounterOption> = emptyList(),
     val itemNames: Map<Long, String> = emptyMap(),
@@ -153,6 +156,7 @@ class MainViewModel : ViewModel() {
     private val codec = MainBinCodec()
     private val inventoryCodec = InventoryCodec()
     private val gashaCodec = GashaStateCodec()
+    private var gashaPredictor = GashaPredictor(emptyList())
     private val sasuraiCodec = SasuraiCodec()
     private var masterData = YokaiMasterData.EMPTY
     private var saveDomainMasterData = SaveDomainMasterData.EMPTY
@@ -173,8 +177,10 @@ class MainViewModel : ViewModel() {
                 itemKindOptions = buildItemKindOptions(data.itemNames),
                 equipmentKindOptions = buildItemKindOptions(data.equipmentNames),
                 sasuraiEncounterOptions = data.sasuraiEncounterOptions,
+                gashaPrizeEntries = data.gashaPrizeEntries,
             )
         }
+        gashaPredictor = GashaPredictor(data.gashaPrizeEntries)
     }
 
     fun setMasterData(data: YokaiMasterData) {
@@ -410,7 +416,10 @@ class MainViewModel : ViewModel() {
                                 withEquipmentId
                             }
                         }
-                        val withSasurai = snapshot.sasuraiResidents.fold(withEquipment) { current, resident ->
+                        val withGasha = snapshot.gashaStates.fold(withEquipment) { current, entry ->
+                            gashaCodec.replaceEntry(current, entry)
+                        }
+                        val withSasurai = snapshot.sasuraiResidents.fold(withGasha) { current, resident ->
                             if (!resident.isUsed) {
                                 current
                             } else {
@@ -495,6 +504,7 @@ class MainViewModel : ViewModel() {
                 equipmentItems = domains.equipmentItems,
                 keyItems = domains.keyItems,
                 gashaStates = domains.gashaStates,
+                gashaPrizeEntries = saveDomainMasterData.gashaPrizeEntries,
                 sasuraiResidents = domains.sasuraiResidents,
                 safeItemQuantityCeilings = safeQuantityCeilings(domains.inventoryItems),
                 attitudes = masterData.attitudes,
@@ -708,6 +718,53 @@ class MainViewModel : ViewModel() {
             state.copy(
                 equipmentItems = updated,
                 hasUnsavedChanges = state.hasUnsavedChanges || updated != state.equipmentItems,
+            )
+        }
+    }
+
+    fun advanceGashaState(slotIndex: Int) {
+        if (isFileOperationBusy()) return
+        _uiState.update { state ->
+            val updated = state.gashaStates.map { entry ->
+                if (entry.index == slotIndex) gashaPredictor.advance(entry, 1) else entry
+            }
+            state.copy(
+                gashaStates = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.gashaStates,
+                message = "${GashaStateCodec.SLOT_INFO[slotIndex]?.name ?: "slot $slotIndex"} のstateを1回進めました",
+            )
+        }
+    }
+
+    fun advanceGashaToPrize(slotIndex: Int, configKey: Long) {
+        if (isFileOperationBusy()) return
+        val state = _uiState.value
+        val entry = state.gashaStates.firstOrNull { it.index == slotIndex } ?: return
+        val prize = state.gashaPrizeEntries.firstOrNull { it.slot == slotIndex && it.configKey == configKey }
+            ?: return
+        val advanceCount = runCatching {
+            gashaPredictor.advanceCountUntilPrize(entry, configKey)
+        }.getOrElse { error ->
+            _uiState.update { it.copy(message = "ガシャ予測失敗: ${error.message}") }
+            return
+        }
+        if (advanceCount == null) {
+            _uiState.update { it.copy(message = "${prize.name} は10000回先までに見つかりません") }
+            return
+        }
+        _uiState.update { current ->
+            val updatedEntry = gashaPredictor.advance(entry, advanceCount)
+            val updated = current.gashaStates.map {
+                if (it.index == slotIndex) updatedEntry else it
+            }
+            current.copy(
+                gashaStates = updated,
+                hasUnsavedChanges = current.hasUnsavedChanges || updated != current.gashaStates,
+                message = if (advanceCount == 0) {
+                    "次回はすでに ${prize.name} です"
+                } else {
+                    "${GashaStateCodec.SLOT_INFO[slotIndex]?.name ?: "slot $slotIndex"} を${advanceCount}回分進め、次回を ${prize.name} にしました"
+                },
             )
         }
     }
@@ -1081,6 +1138,7 @@ class MainViewModel : ViewModel() {
                 equipmentItems = loadedData.domains.equipmentItems,
                 keyItems = loadedData.domains.keyItems,
                 gashaStates = loadedData.domains.gashaStates,
+                gashaPrizeEntries = saveDomainMasterData.gashaPrizeEntries,
                 sasuraiResidents = loadedData.domains.sasuraiResidents,
                 sasuraiEncounterOptions = saveDomainMasterData.sasuraiEncounterOptions,
                 itemNames = saveDomainMasterData.itemNames,

@@ -65,4 +65,13 @@ class GashaStateCodec {
         if (backup.size != REGION_SIZE) throw IOException("ガシャstateバックアップのサイズが不正です")
         return gameData.copyOf().also { backup.copyInto(it, OFFSET) }
     }
+
+    fun replaceEntry(gameData: ByteArray, entry: GashaStateEntry): ByteArray {
+        if (entry.index !in 0 until ENTRY_COUNT) throw IOException("ガシャstate slotが不正です")
+        if (entry.rawEntry.size != STRIDE) throw IOException("ガシャstate entryサイズが不正です")
+        SaveDataBinary.requireRange(gameData, OFFSET, REGION_SIZE, "ガシャstate領域")
+        val out = gameData.copyOf()
+        entry.rawEntry.copyInto(out, OFFSET + entry.index * STRIDE)
+        return out
+    }
 }

@@ -83,6 +83,8 @@ import com.atuy.yws1editor.yokai.EquipmentEntry
 import com.atuy.yws1editor.yokai.KeyItemEntry
 import com.atuy.yws1editor.yokai.GashaStateEntry
 import com.atuy.yws1editor.yokai.GashaStateCodec
+import com.atuy.yws1editor.yokai.GashaPredictor
+import com.atuy.yws1editor.yokai.GashaPrizeEntry
 import com.atuy.yws1editor.yokai.SasuraiEncounterOption
 import com.atuy.yws1editor.yokai.SasuraiResident
 import com.atuy.yws1editor.yokai.SaveDomainMasterLoader
@@ -337,6 +339,8 @@ private fun AppScreen(
             onItemKindChange = mainViewModel::updateItemKind,
             onEquipmentOwnedCountChange = mainViewModel::updateEquipmentOwnedCount,
             onEquipmentKindChange = mainViewModel::updateEquipmentKind,
+            onGashaAdvance = mainViewModel::advanceGashaState,
+            onGashaAdvanceToPrize = mainViewModel::advanceGashaToPrize,
             onSasuraiEncounterChange = mainViewModel::updateSasuraiEncounter,
             onPlayHoursChange = mainViewModel::updatePlayHours,
             onPlayMinutesChange = mainViewModel::updatePlayMinutes,
@@ -571,6 +575,8 @@ private fun EditorScreen(
     onItemKindChange: (Int, Long) -> Unit,
     onEquipmentOwnedCountChange: (Int, Int) -> Unit,
     onEquipmentKindChange: (Int, Long) -> Unit,
+    onGashaAdvance: (Int) -> Unit,
+    onGashaAdvanceToPrize: (Int, Long) -> Unit,
     onSasuraiEncounterChange: (Int, Long) -> Unit,
     onPlayHoursChange: (Int) -> Unit,
     onPlayMinutesChange: (Int) -> Unit,
@@ -734,6 +740,10 @@ private fun EditorScreen(
 
                 EditorTopTab.Gasha -> GashaTabContent(
                     entries = state.gashaStates,
+                    prizeEntries = state.gashaPrizeEntries,
+                    enabled = !fileOperationBusy,
+                    onAdvance = onGashaAdvance,
+                    onAdvanceToPrize = onGashaAdvanceToPrize,
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -1361,22 +1371,124 @@ private fun KeyItemTabContent(
 }
 
 @Composable
-private fun GashaTabContent(entries: List<GashaStateEntry>, modifier: Modifier = Modifier) {
-    ReadOnlyDomainList(
-        title = "ガシャstateは読取り専用です。slot名、rate list key、4ワードのraw値を表示します。",
-        emptyText = "ガシャstateを読み込めませんでした",
-        values = entries,
-        key = { it.index },
-        modifier = modifier,
-    ) { entry ->
-        val info = GashaStateCodec.SLOT_INFO[entry.index]
-        val rateListText = info?.rateListKey?.let { "rate ${formatU32(it)}" } ?: "rate list未確認"
-        DomainCard(
-            title = info?.name ?: "未使用slot ${entry.index}",
-            subtitle = "slot ${entry.index}  •  $rateListText",
-            detail = entry.words.joinToString("  ") { formatU32(it) } +
-                (info?.note?.let { "\n$it" } ?: ""),
-        )
+private fun GashaTabContent(
+    entries: List<GashaStateEntry>,
+    prizeEntries: List<GashaPrizeEntry>,
+    enabled: Boolean,
+    onAdvance: (Int) -> Unit,
+    onAdvanceToPrize: (Int, Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val predictor = remember(prizeEntries) { GashaPredictor(prizeEntries) }
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+            ) {
+                Text(
+                    text = "次回から5回先までの景品を予測します。stateを進めてもコイン消費や景品入手は行いません。",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        if (entries.isEmpty()) {
+            item { EmptyDomainText("ガシャstateを読み込めませんでした") }
+        }
+        items(entries, key = { it.index }) { entry ->
+            val info = GashaStateCodec.SLOT_INFO[entry.index]
+            val slotPrizes = remember(prizeEntries, entry.index) {
+                prizeEntries.filter { it.slot == entry.index }
+            }
+            var selectedConfigKey by remember(entry.index, slotPrizes) {
+                mutableStateOf(slotPrizes.firstOrNull()?.configKey)
+            }
+            val predictions = remember(entry.rawEntry.toList(), prizeEntries) {
+                runCatching { predictor.predict(entry, 5) }.getOrDefault(emptyList())
+            }
+            val rateListText = info?.rateListKey?.let { "rate ${formatU32(it)}" } ?: "rate list未確認"
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(info?.name ?: "未使用slot ${entry.index}", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "slot ${entry.index}  •  $rateListText",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        entry.words.joinToString("  ") { formatU32(it) },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (predictions.isEmpty()) {
+                        Text(
+                            "このslotの景品テーブルはありません",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            predictions.forEach { prediction ->
+                                Text(
+                                    "${prediction.drawIndex}回目: ${prediction.prize.name} " +
+                                        "(${prediction.prize.prizeKind}, ${formatU32(prediction.prize.prizeId)})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = { onAdvance(entry.index) },
+                                enabled = enabled,
+                            ) {
+                                Text("1回進める")
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            GashaPrizeDropdown(
+                                options = slotPrizes,
+                                selectedConfigKey = selectedConfigKey,
+                                enabled = enabled,
+                                onSelected = { selectedConfigKey = it },
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(
+                                onClick = {
+                                    selectedConfigKey?.let { onAdvanceToPrize(entry.index, it) }
+                                },
+                                enabled = enabled && selectedConfigKey != null,
+                            ) {
+                                Text("この景品まで")
+                            }
+                        }
+                    }
+                    info?.note?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+        item { Spacer(Modifier.height(12.dp)) }
     }
 }
 
@@ -1913,6 +2025,56 @@ private fun ItemKindDropdown(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GashaPrizeDropdown(
+    options: List<GashaPrizeEntry>,
+    selectedConfigKey: Long?,
+    enabled: Boolean,
+    onSelected: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = options.firstOrNull { it.configKey == selectedConfigKey }
+    val selectedLabel = selected?.let { gashaPrizeLabel(it) } ?: "景品を選択"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled && options.isNotEmpty()) expanded = !expanded },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            enabled = enabled && options.isNotEmpty(),
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = enabled)
+                .fillMaxWidth(),
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(gashaPrizeLabel(option)) },
+                    onClick = {
+                        onSelected(option.configKey)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun gashaPrizeLabel(entry: GashaPrizeEntry): String {
+    return "${entry.name}  ${entry.rangeStart}..${entry.rangeEndExclusive - 1}"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

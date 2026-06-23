@@ -8,9 +8,10 @@ data class SaveDomainMasterData(
     val equipmentNames: Map<Long, String>,
     val keyItemNames: Map<Long, String>,
     val sasuraiEncounterOptions: List<SasuraiEncounterOption>,
+    val gashaPrizeEntries: List<GashaPrizeEntry>,
 ) {
     companion object {
-        val EMPTY = SaveDomainMasterData(emptyMap(), emptyMap(), emptyMap(), emptyList())
+        val EMPTY = SaveDomainMasterData(emptyMap(), emptyMap(), emptyMap(), emptyList(), emptyList())
     }
 }
 
@@ -24,6 +25,7 @@ object SaveDomainMasterLoader {
             equipmentNames = loadNames(context, R.raw.equipment_ja_jp),
             keyItemNames = loadNames(context, R.raw.important_ja_jp),
             sasuraiEncounterOptions = loadSasuraiEncounters(context),
+            gashaPrizeEntries = loadGashaPrizeTable(context),
         )
     }
 
@@ -62,5 +64,36 @@ object SaveDomainMasterLoader {
     private fun parseHexUInt32(value: String): Long? {
         val normalized = value.removePrefix("0x").removePrefix("0X")
         return normalized.toLongOrNull(16)?.let { it and 0xFFFF_FFFFL }
+    }
+
+    private fun loadGashaPrizeTable(context: Context): List<GashaPrizeEntry> {
+        val lines = context.resources.openRawResource(R.raw.gasha_prize_table)
+            .bufferedReader(Charsets.UTF_8)
+            .use { it.readLines() }
+        return lines.drop(1).mapNotNull { line ->
+            val columns = line.split('\t')
+            if (columns.size < 14) return@mapNotNull null
+            val slot = columns[0].toIntOrNull() ?: return@mapNotNull null
+            val rateListKey = parseHexUInt32(columns[1]) ?: return@mapNotNull null
+            val rangeStart = columns[2].toIntOrNull() ?: return@mapNotNull null
+            val rangeEndExclusive = columns[3].toIntOrNull() ?: return@mapNotNull null
+            val configKey = parseHexUInt32(columns[4]) ?: return@mapNotNull null
+            val prizeId = parseHexUInt32(columns[6]) ?: return@mapNotNull null
+            val classWeights = listOf(columns[9], columns[10], columns[11], columns[12], columns[13]).map { value ->
+                value.toIntOrNull() ?: 0
+            }
+            GashaPrizeEntry(
+                slot = slot,
+                rateListKey = rateListKey,
+                rangeStart = rangeStart,
+                rangeEndExclusive = rangeEndExclusive,
+                configKey = configKey,
+                prizeKind = columns[5],
+                prizeId = prizeId,
+                identifier = columns[7],
+                name = columns[8],
+                classWeights = classWeights,
+            )
+        }
     }
 }
