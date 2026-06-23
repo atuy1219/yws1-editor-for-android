@@ -373,7 +373,7 @@ class MainViewModel : ViewModel() {
                                 )
                             }
                         }
-                        val withSasurai = snapshot.sasuraiResidents.fold(withInventory) { current, resident ->
+                        val withSasurai = snapshot.sasuraiResidents.fold(withEquipment) { current, resident ->
                             if (!resident.isUsed) {
                                 current
                             } else {
@@ -385,7 +385,6 @@ class MainViewModel : ViewModel() {
                             }
                         }
                         val writeResult = SaveInfoCodec.apply(
-                            baseGameData = withEquipment,
                             baseGameData = withSasurai,
                             baseHeadData = headSection.decryptedData,
                             sectionName = sectionName,
