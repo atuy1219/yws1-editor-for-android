@@ -110,6 +110,37 @@ class InventoryCodecTest {
     }
 
     @Test
+    fun replacesOnlyExistingItemId() {
+        val data = fixture().also {
+            putU32(it, InventoryCodec.ITEM_OFFSET, 0x00001000)
+            putU32(it, InventoryCodec.ITEM_OFFSET + 4, 0x11223344)
+            it[InventoryCodec.ITEM_OFFSET + 8] = 4
+            it[InventoryCodec.ITEM_OFFSET + 9] = 0x55
+            it[InventoryCodec.ITEM_OFFSET + 10] = 0x66
+            it[InventoryCodec.ITEM_OFFSET + 11] = 0x77
+        }
+
+        val changed = codec.replaceItemId(data, entryIndex = 0, newItemId = 0xAABBCCDD)
+
+        val expected = data.copyOf().also { putU32(it, InventoryCodec.ITEM_OFFSET + 4, 0xAABBCCDD) }
+        assertArrayEquals(expected, changed)
+        assertEquals(4, changed[InventoryCodec.ITEM_OFFSET + 8].toInt())
+    }
+
+    @Test
+    fun itemIdRequiresExistingEntryAndNonZeroId() {
+        val empty = fixture()
+        assertThrows(IOException::class.java) {
+            codec.replaceItemId(empty, 0, 1)
+        }
+
+        val used = fixture().also { putU32(it, InventoryCodec.ITEM_OFFSET + 4, 1) }
+        assertThrows(IOException::class.java) {
+            codec.replaceItemId(used, 0, 0)
+        }
+    }
+
+    @Test
     fun rejectsEquipmentOwnedCountBelowEquippedCount() {
         val data = fixture().also {
             putU32(it, InventoryCodec.EQUIPMENT_OFFSET + 4, 0x10203040)
@@ -119,6 +150,23 @@ class InventoryCodecTest {
 
         val error = assertThrows(IOException::class.java) { codec.decode(data) }
         assertTrue(error.message.orEmpty().contains("装備中数未満"))
+    }
+
+    @Test
+    fun replacesOnlyExistingEquipmentId() {
+        val data = fixture().also {
+            putU32(it, InventoryCodec.EQUIPMENT_OFFSET, 0x00002000)
+            putU32(it, InventoryCodec.EQUIPMENT_OFFSET + 4, 0x01020304)
+            it[InventoryCodec.EQUIPMENT_OFFSET + 8] = 3
+            it[InventoryCodec.EQUIPMENT_OFFSET + 12] = 2
+        }
+
+        val changed = codec.replaceEquipmentId(data, entryIndex = 0, newItemId = 0x55667788)
+
+        val expected = data.copyOf().also { putU32(it, InventoryCodec.EQUIPMENT_OFFSET + 4, 0x55667788) }
+        assertArrayEquals(expected, changed)
+        assertEquals(3, changed[InventoryCodec.EQUIPMENT_OFFSET + 8].toInt())
+        assertEquals(2, changed[InventoryCodec.EQUIPMENT_OFFSET + 12].toInt())
     }
 
     @Test

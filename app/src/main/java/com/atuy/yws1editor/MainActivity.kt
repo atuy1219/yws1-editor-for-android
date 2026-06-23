@@ -82,6 +82,7 @@ import com.atuy.yws1editor.yokai.InventoryItemEntry
 import com.atuy.yws1editor.yokai.EquipmentEntry
 import com.atuy.yws1editor.yokai.KeyItemEntry
 import com.atuy.yws1editor.yokai.GashaStateEntry
+import com.atuy.yws1editor.yokai.GashaStateCodec
 import com.atuy.yws1editor.yokai.SasuraiEncounterOption
 import com.atuy.yws1editor.yokai.SasuraiResident
 import com.atuy.yws1editor.yokai.SaveDomainMasterLoader
@@ -333,7 +334,9 @@ private fun AppScreen(
                 mainViewModel.updateStat(slot, group, index, value)
             },
             onItemQuantityChange = mainViewModel::updateItemQuantity,
+            onItemKindChange = mainViewModel::updateItemKind,
             onEquipmentOwnedCountChange = mainViewModel::updateEquipmentOwnedCount,
+            onEquipmentKindChange = mainViewModel::updateEquipmentKind,
             onSasuraiEncounterChange = mainViewModel::updateSasuraiEncounter,
             onPlayHoursChange = mainViewModel::updatePlayHours,
             onPlayMinutesChange = mainViewModel::updatePlayMinutes,
@@ -565,7 +568,9 @@ private fun EditorScreen(
     onStateFlagChange: (Int, Int, Boolean) -> Unit,
     onStatChange: (Int, StatGroup, Int, Int) -> Unit,
     onItemQuantityChange: (Int, Int) -> Unit,
+    onItemKindChange: (Int, Long) -> Unit,
     onEquipmentOwnedCountChange: (Int, Int) -> Unit,
+    onEquipmentKindChange: (Int, Long) -> Unit,
     onSasuraiEncounterChange: (Int, Long) -> Unit,
     onPlayHoursChange: (Int) -> Unit,
     onPlayMinutesChange: (Int) -> Unit,
@@ -704,15 +709,19 @@ private fun EditorScreen(
                 EditorTopTab.Item -> ItemTabContent(
                     entries = state.inventoryItems,
                     names = state.itemNames,
+                    options = state.itemKindOptions,
                     enabled = !fileOperationBusy,
                     onQuantityChange = onItemQuantityChange,
+                    onKindChange = onItemKindChange,
                     modifier = Modifier.fillMaxSize(),
                 )
 
                 EditorTopTab.Equipment -> EquipmentTabContent(
                     entries = state.equipmentItems,
                     names = state.equipmentNames,
+                    options = state.equipmentKindOptions,
                     enabled = !fileOperationBusy,
+                    onKindChange = onEquipmentKindChange,
                     onOwnedCountChange = onEquipmentOwnedCountChange,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -1170,8 +1179,10 @@ private fun PlaceholderTabContent(
 private fun ItemTabContent(
     entries: List<InventoryItemEntry>,
     names: Map<Long, String>,
+    options: List<ItemKindOption>,
     enabled: Boolean,
     onQuantityChange: (Int, Int) -> Unit,
+    onKindChange: (Int, Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val used = entries.filter { it.isUsed }
@@ -1188,7 +1199,7 @@ private fun ItemTabContent(
                     .padding(top = 12.dp),
             ) {
                 Text(
-                    text = "数量は0-99の範囲で編集できます。新規追加・削除はできません。",
+                    text = "既存entryの種類と数量を編集できます。新規追加・削除はできません。",
                     modifier = Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1199,31 +1210,42 @@ private fun ItemTabContent(
         }
         items(used, key = { it.index }) { entry ->
             Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(names[entry.itemId] ?: "ID ${formatU32(entry.itemId)}", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "slot ${entry.index}  •  ${formatU32(entry.itemId)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(
-                            onClick = { onQuantityChange(entry.index, entry.quantity - 1) },
-                            enabled = enabled && entry.quantity > 0,
-                        ) { Text("−") }
-                        Text("${entry.quantity}", style = MaterialTheme.typography.titleMedium)
-                        TextButton(
-                            onClick = { onQuantityChange(entry.index, entry.quantity + 1) },
-                            enabled = enabled && entry.quantity < 99,
-                        ) { Text("＋") }
+                    Text(names[entry.itemId] ?: "ID ${formatU32(entry.itemId)}", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "slot ${entry.index}  •  ${formatU32(entry.itemId)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ItemKindDropdown(
+                        options = options,
+                        selectedId = entry.itemId,
+                        enabled = enabled,
+                        onSelected = { onKindChange(entry.index, it) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("数量")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(
+                                onClick = { onQuantityChange(entry.index, entry.quantity - 1) },
+                                enabled = enabled && entry.quantity > 0,
+                            ) { Text("−") }
+                            Text("${entry.quantity}", style = MaterialTheme.typography.titleMedium)
+                            TextButton(
+                                onClick = { onQuantityChange(entry.index, entry.quantity + 1) },
+                                enabled = enabled && entry.quantity < 99,
+                            ) { Text("＋") }
+                        }
                     }
                 }
             }
@@ -1236,7 +1258,9 @@ private fun ItemTabContent(
 private fun EquipmentTabContent(
     entries: List<EquipmentEntry>,
     names: Map<Long, String>,
+    options: List<ItemKindOption>,
     enabled: Boolean = true,
+    onKindChange: (Int, Long) -> Unit = { _, _ -> },
     onOwnedCountChange: (Int, Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
@@ -1254,7 +1278,7 @@ private fun EquipmentTabContent(
                     .padding(top = 12.dp),
             ) {
                 Text(
-                    text = "所持数は0-99の範囲で編集できます。装備中の数は編集できません。",
+                    text = "既存entryの種類と所持数を編集できます。装備中の数、新規追加・削除はできません。",
                     modifier = Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1276,6 +1300,13 @@ private fun EquipmentTabContent(
                         "slot ${entry.index}  •  ${formatU32(entry.itemId)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ItemKindDropdown(
+                        options = options,
+                        selectedId = entry.itemId,
+                        enabled = enabled,
+                        onSelected = { onKindChange(entry.index, it) },
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1332,16 +1363,19 @@ private fun KeyItemTabContent(
 @Composable
 private fun GashaTabContent(entries: List<GashaStateEntry>, modifier: Modifier = Modifier) {
     ReadOnlyDomainList(
-        title = "ガシャstateは読取り専用です。各slotの4ワードをraw値で表示します。",
+        title = "ガシャstateは読取り専用です。slot名、rate list key、4ワードのraw値を表示します。",
         emptyText = "ガシャstateを読み込めませんでした",
         values = entries,
         key = { it.index },
         modifier = modifier,
     ) { entry ->
+        val info = GashaStateCodec.SLOT_INFO[entry.index]
+        val rateListText = info?.rateListKey?.let { "rate ${formatU32(it)}" } ?: "rate list未確認"
         DomainCard(
-            title = "state ${entry.index}",
-            subtitle = entry.words.joinToString("  ") { formatU32(it) },
-            detail = null,
+            title = info?.name ?: "未使用slot ${entry.index}",
+            subtitle = "slot ${entry.index}  •  $rateListText",
+            detail = entry.words.joinToString("  ") { formatU32(it) } +
+                (info?.note?.let { "\n$it" } ?: ""),
         )
     }
 }
@@ -1823,6 +1857,52 @@ private fun YokaiDropdown(
             onDismissRequest = { expanded = false },
         ) {
             yokaiOptions.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.name) },
+                    onClick = {
+                        onSelected(option.id)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ItemKindDropdown(
+    options: List<ItemKindOption>,
+    selectedId: Long,
+    enabled: Boolean,
+    onSelected: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = options.firstOrNull { it.id == selectedId }
+    val selectedLabel = selected?.name ?: "ID ${formatU32(selectedId)}"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled) expanded = !expanded },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            enabled = enabled,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = enabled)
+                .fillMaxWidth(),
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(option.name) },
                     onClick = {

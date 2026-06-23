@@ -66,6 +66,11 @@ data class YokaiOption(
     val name: String,
 )
 
+data class ItemKindOption(
+    val id: Long,
+    val name: String,
+)
+
 private val DEFAULT_STARTUP_SLOTS = listOf(
     SaveSlotCard(sectionName = "game0.yw", title = "オートセーブ", subtitle = "game0.yw"),
     SaveSlotCard(sectionName = "game1.yw", title = "にっき1", subtitle = "game1.yw"),
@@ -113,6 +118,8 @@ data class EditorUiState(
     val itemNames: Map<Long, String> = emptyMap(),
     val equipmentNames: Map<Long, String> = emptyMap(),
     val keyItemNames: Map<Long, String> = emptyMap(),
+    val itemKindOptions: List<ItemKindOption> = emptyList(),
+    val equipmentKindOptions: List<ItemKindOption> = emptyList(),
     val safeItemQuantityCeilings: Map<Int, Int> = emptyMap(),
 )
 
@@ -163,6 +170,8 @@ class MainViewModel : ViewModel() {
                 itemNames = data.itemNames,
                 equipmentNames = data.equipmentNames,
                 keyItemNames = data.keyItemNames,
+                itemKindOptions = buildItemKindOptions(data.itemNames),
+                equipmentKindOptions = buildItemKindOptions(data.equipmentNames),
                 sasuraiEncounterOptions = data.sasuraiEncounterOptions,
             )
         }
@@ -350,27 +359,55 @@ class MainViewModel : ViewModel() {
                         )
                         val withYokai = parser.applyEntries(section.decryptedData, snapshot.entries)
                         val withInventory = snapshot.inventoryItems.fold(withYokai) { current, item ->
+                            val originalItemId = readUInt32LeFromRaw(item.rawEntry, 4)
                             val originalQuantity = item.rawEntry.getOrNull(8)?.toInt()
-                            if (!item.isUsed || item.quantity == originalQuantity) {
-                                current
-                            } else {
-                                inventoryCodec.replaceItemQuantity(
+                            if (!item.isUsed) {
+                                return@fold current
+                            }
+                            val withItemId = if (item.itemId != originalItemId) {
+                                inventoryCodec.replaceItemId(
                                     gameData = current,
                                     entryIndex = item.index,
-                                    newQuantity = item.quantity,
+                                    newItemId = item.itemId,
                                 )
+                            } else {
+                                current
+                            }
+                            if (item.quantity != originalQuantity) {
+                                inventoryCodec.replaceItemQuantity(
+                                    gameData = withItemId,
+                                    entryIndex = item.index,
+                                    newQuantity = item.quantity,
+                                    maximumQuantity = snapshot.safeItemQuantityCeilings[item.index]
+                                        ?: error("どうぐ[${item.index}]の安全上限がありません"),
+                                )
+                            } else {
+                                withItemId
                             }
                         }
                         val withEquipment = snapshot.equipmentItems.fold(withInventory) { current, item ->
+                            val originalItemId = readUInt32LeFromRaw(item.rawEntry, 4)
                             val originalOwnedCount = item.rawEntry.getOrNull(8)?.toInt()
-                            if (!item.isUsed || item.ownedCount == originalOwnedCount) {
-                                current
-                            } else {
-                                inventoryCodec.replaceEquipmentOwnedCount(
+                            if (!item.isUsed) {
+                                return@fold current
+                            }
+                            val withEquipmentId = if (item.itemId != originalItemId) {
+                                inventoryCodec.replaceEquipmentId(
                                     gameData = current,
+                                    entryIndex = item.index,
+                                    newItemId = item.itemId,
+                                )
+                            } else {
+                                current
+                            }
+                            if (item.ownedCount != originalOwnedCount) {
+                                inventoryCodec.replaceEquipmentOwnedCount(
+                                    gameData = withEquipmentId,
                                     entryIndex = item.index,
                                     newOwnedCount = item.ownedCount,
                                 )
+                            } else {
+                                withEquipmentId
                             }
                         }
                         val withSasurai = snapshot.sasuraiResidents.fold(withEquipment) { current, resident ->
@@ -621,6 +658,34 @@ class MainViewModel : ViewModel() {
             state.copy(
                 inventoryItems = updated,
                 hasUnsavedChanges = state.hasUnsavedChanges || updated != state.inventoryItems,
+            )
+        }
+    }
+
+    fun updateItemKind(entryIndex: Int, itemId: Long) {
+        if (isFileOperationBusy()) return
+        if (itemId !in saveDomainMasterData.itemNames) return
+        _uiState.update { state ->
+            val updated = state.inventoryItems.map { item ->
+                if (item.index == entryIndex && item.isUsed) item.copy(itemId = itemId) else item
+            }
+            state.copy(
+                inventoryItems = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.inventoryItems,
+            )
+        }
+    }
+
+    fun updateEquipmentKind(entryIndex: Int, itemId: Long) {
+        if (isFileOperationBusy()) return
+        if (itemId !in saveDomainMasterData.equipmentNames) return
+        _uiState.update { state ->
+            val updated = state.equipmentItems.map { item ->
+                if (item.index == entryIndex && item.isUsed) item.copy(itemId = itemId) else item
+            }
+            state.copy(
+                equipmentItems = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.equipmentItems,
             )
         }
     }
@@ -1021,6 +1086,8 @@ class MainViewModel : ViewModel() {
                 itemNames = saveDomainMasterData.itemNames,
                 equipmentNames = saveDomainMasterData.equipmentNames,
                 keyItemNames = saveDomainMasterData.keyItemNames,
+                itemKindOptions = buildItemKindOptions(saveDomainMasterData.itemNames),
+                equipmentKindOptions = buildItemKindOptions(saveDomainMasterData.equipmentNames),
                 safeItemQuantityCeilings = safeQuantityCeilings(loadedData.domains.inventoryItems),
                 attitudes = masterData.attitudes,
                 expandedYokaiSlot = null,
@@ -1071,6 +1138,19 @@ class MainViewModel : ViewModel() {
     private fun buildYokaiOptions(data: YokaiMasterData): List<YokaiOption> {
         return data.nameById
             .map { (id, name) -> YokaiOption(id = id, name = name) }
+    }
+
+    private fun buildItemKindOptions(names: Map<Long, String>): List<ItemKindOption> {
+        return names.map { (id, name) -> ItemKindOption(id = id, name = name) }
+            .sortedWith(compareBy<ItemKindOption> { it.name }.thenBy { it.id })
+    }
+
+    private fun readUInt32LeFromRaw(raw: ByteArray, offset: Int): Long {
+        if (offset < 0 || offset + 4 > raw.size) return -1L
+        return (raw[offset].toLong() and 0xffL) or
+            ((raw[offset + 1].toLong() and 0xffL) shl 8) or
+            ((raw[offset + 2].toLong() and 0xffL) shl 16) or
+            ((raw[offset + 3].toLong() and 0xffL) shl 24)
     }
 
     private fun parseSaveDomains(gameData: ByteArray): SaveDomains {
