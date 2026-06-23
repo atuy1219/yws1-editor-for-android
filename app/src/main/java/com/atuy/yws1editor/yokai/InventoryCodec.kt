@@ -113,21 +113,17 @@ class InventoryCodec {
 
     /**
      * Changes only the low byte of an existing item's serialized quantity.
-     * The maximum is item-specific (`ItemConfig + 0x2e`) and must come from trusted master data.
+     * Limited to 0-99.
      */
     fun replaceItemQuantity(
         gameData: ByteArray,
         entryIndex: Int,
         newQuantity: Int,
-        maximumQuantity: Int,
     ): ByteArray {
         if (entryIndex !in 0 until ITEM_COUNT) throw IOException("どうぐentry番号が不正です")
         SaveDataBinary.requireRange(gameData, ITEM_OFFSET, ITEM_COUNT * ITEM_STRIDE, "どうぐ領域")
-        if (maximumQuantity !in 0..SERIALIZED_SIGNED_BYTE_MAX) {
-            throw IOException("ItemConfig由来の最大数量が不正です")
-        }
-        if (newQuantity !in 0..maximumQuantity) {
-            throw IOException("どうぐ数量がItemConfigの上限を越えています")
+        if (newQuantity !in 0..99) {
+            throw IOException("どうぐ数量は0～99の範囲で指定してください")
         }
 
         val offset = ITEM_OFFSET + entryIndex * ITEM_STRIDE
@@ -136,6 +132,36 @@ class InventoryCodec {
         }
         val out = gameData.copyOf()
         out[offset + QUANTITY_FIELD] = newQuantity.toByte()
+        return out
+    }
+
+    /**
+     * Changes the owned count of equipment. The equipped count must remain <= owned count.
+     * Limited to 0-99.
+     */
+    fun replaceEquipmentOwnedCount(
+        gameData: ByteArray,
+        entryIndex: Int,
+        newOwnedCount: Int,
+    ): ByteArray {
+        if (entryIndex !in 0 until EQUIPMENT_COUNT) throw IOException("そうびentry番号が不正です")
+        SaveDataBinary.requireRange(gameData, EQUIPMENT_OFFSET, EQUIPMENT_COUNT * EQUIPMENT_STRIDE, "そうび領域")
+        if (newOwnedCount !in 0..99) {
+            throw IOException("そうび所持数は0～99の範囲で指定してください")
+        }
+
+        val offset = EQUIPMENT_OFFSET + entryIndex * EQUIPMENT_STRIDE
+        val itemId = SaveDataBinary.readUInt32Le(gameData, offset + ID_FIELD)
+        if (itemId == 0L) {
+            throw IOException("空欄のそうびentryは変更できません")
+        }
+        val equippedCount = readSignedCount(gameData, offset + EQUIPPED_FIELD, "そうび[$entryIndex]の装備中数")
+        if (newOwnedCount < equippedCount) {
+            throw IOException("そうび[$entryIndex]の所持数は装備中数(${equippedCount})以上である必要があります")
+        }
+
+        val out = gameData.copyOf()
+        out[offset + QUANTITY_FIELD] = newOwnedCount.toByte()
         return out
     }
 
