@@ -23,6 +23,7 @@ data class Stat5(
 
 data class YokaiEntry(
     val slot: Int,
+    val handle: Long,
     val id: Long,
     val name: String,
     val level: Int,
@@ -39,6 +40,13 @@ data class YokaiEntry(
     val baseStats: Stat5? = null,
     val growPattern: Stat5? = null,
     val yokaiClass: Int? = null,
+)
+
+data class PartyMemberEntry(
+    val position: Int,
+    val yokaiHandle: Long,
+    val yokaiSlot: Int?,
+    val yokaiName: String,
 )
 
 data class MainSection(
@@ -77,4 +85,3 @@ fun yokaiClassLabel(value: Int?): String {
         else -> "不明($value)"
     }
 }
-

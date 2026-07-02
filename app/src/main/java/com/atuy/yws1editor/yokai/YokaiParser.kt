@@ -17,6 +17,7 @@ class YokaiParser(
             val base = yokaiStart + i * yokaiSize
             if (base + yokaiSize > game0Data.size) break
 
+            val handle = readIntLe(game0Data, base).toLong() and 0xFFFFFFFFL
             val yokaiId = readIntLe(game0Data, base + 0x04).toLong() and 0xFFFFFFFFL
             if (yokaiId == 0L || yokaiId == 0xFFFFFFFFL) continue
 
@@ -77,6 +78,7 @@ class YokaiParser(
             result.add(
                 YokaiEntry(
                     slot = i,
+                    handle = handle,
                     id = yokaiId,
                     name = when {
                         !masterName.isNullOrBlank() -> masterName
@@ -167,4 +169,3 @@ class YokaiParser(
         }
     }
 }
-

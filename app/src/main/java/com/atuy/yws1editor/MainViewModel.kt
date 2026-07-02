@@ -6,6 +6,8 @@ import com.atuy.yws1editor.yokai.MainBinCodec
 import com.atuy.yws1editor.yokai.MainBinBackupInfo
 import com.atuy.yws1editor.yokai.MainBinDecoded
 import com.atuy.yws1editor.yokai.InventoryCodec
+import com.atuy.yws1editor.yokai.PartyCodec
+import com.atuy.yws1editor.yokai.PartyMemberEntry
 import com.atuy.yws1editor.yokai.InventoryItemEntry
 import com.atuy.yws1editor.yokai.EquipmentEntry
 import com.atuy.yws1editor.yokai.KeyItemEntry
@@ -43,6 +45,7 @@ enum class AppScreen {
 
 enum class EditorTopTab(val label: String) {
     Yokai("妖怪"),
+    Party("パーティ"),
     Item("どうぐ"),
     Equipment("そうび"),
     KeyItem("だいじなもの"),
@@ -112,6 +115,7 @@ data class EditorUiState(
     val isCheatMode: Boolean = false,
     val hasUnsavedChanges: Boolean = false,
     val inventoryItems: List<InventoryItemEntry> = emptyList(),
+    val partyMembers: List<PartyMemberEntry> = emptyList(),
     val equipmentItems: List<EquipmentEntry> = emptyList(),
     val keyItems: List<KeyItemEntry> = emptyList(),
     val gashaStates: List<GashaStateEntry> = emptyList(),
@@ -155,6 +159,7 @@ class MainViewModel : ViewModel() {
     private val gateway = ShizukuFileGateway()
     private val codec = MainBinCodec()
     private val inventoryCodec = InventoryCodec()
+    private val partyCodec = PartyCodec()
     private val gashaCodec = GashaStateCodec()
     private var gashaPredictor = GashaPredictor(emptyList())
     private val sasuraiCodec = SasuraiCodec()
@@ -218,6 +223,7 @@ class MainViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(
                         entries = refreshedEntries,
+                        partyMembers = refreshPartyMembers(it.partyMembers, refreshedEntries),
                         attitudes = masterData.attitudes,
                         selectedSlot = currentSlot?.takeIf { slot ->
                             refreshedEntries.any { entry -> entry.slot == slot }
@@ -249,6 +255,7 @@ class MainViewModel : ViewModel() {
                             loaded = false,
                             entries = emptyList(),
                             inventoryItems = emptyList(),
+                            partyMembers = emptyList(),
                             equipmentItems = emptyList(),
                             keyItems = emptyList(),
                             gashaStates = emptyList(),
@@ -419,7 +426,15 @@ class MainViewModel : ViewModel() {
                         val withGasha = snapshot.gashaStates.fold(withEquipment) { current, entry ->
                             gashaCodec.replaceEntry(current, entry)
                         }
-                        val withSasurai = snapshot.sasuraiResidents.fold(withGasha) { current, resident ->
+                        val withParty = if (snapshot.partyMembers.isEmpty()) {
+                            withGasha
+                        } else {
+                            partyCodec.replacePartyMembers(
+                                gameData = withGasha,
+                                handles = snapshot.partyMembers.map { it.yokaiHandle },
+                            )
+                        }
+                        val withSasurai = snapshot.sasuraiResidents.fold(withParty) { current, resident ->
                             if (!resident.isUsed) {
                                 current
                             } else {
@@ -476,6 +491,7 @@ class MainViewModel : ViewModel() {
                     loaded = false,
                     entries = emptyList(),
                     inventoryItems = emptyList(),
+                    partyMembers = emptyList(),
                     equipmentItems = emptyList(),
                     keyItems = emptyList(),
                     gashaStates = emptyList(),
@@ -501,6 +517,7 @@ class MainViewModel : ViewModel() {
                 loaded = true,
                 entries = entries,
                 inventoryItems = domains.inventoryItems,
+                partyMembers = domains.partyMembers,
                 equipmentItems = domains.equipmentItems,
                 keyItems = domains.keyItems,
                 gashaStates = domains.gashaStates,
@@ -785,6 +802,33 @@ class MainViewModel : ViewModel() {
                 sasuraiResidents = updated,
                 hasUnsavedChanges = state.hasUnsavedChanges ||
                     updated.map { it.encounterId } != state.sasuraiResidents.map { it.encounterId },
+            )
+        }
+    }
+
+    fun updatePartyMember(position: Int, yokaiHandle: Long) {
+        if (isFileOperationBusy()) return
+        if (position !in 0 until PartyCodec.PARTY_SIZE) return
+        _uiState.update { state ->
+            val selectedEntry = state.entries.firstOrNull { it.handle == yokaiHandle } ?: return@update state
+            val currentMembers = normalizePartyMembers(state.partyMembers, state.entries)
+            val previousHandle = currentMembers[position].yokaiHandle
+            val swappedPosition = currentMembers.indexOfFirst {
+                it.position != position && it.yokaiHandle == yokaiHandle
+            }
+            val updated = currentMembers.map { member ->
+                when (member.position) {
+                    position -> partyMemberFromEntry(member.position, selectedEntry)
+                    swappedPosition -> {
+                        val previousEntry = state.entries.firstOrNull { it.handle == previousHandle }
+                        if (previousEntry == null) member else partyMemberFromEntry(member.position, previousEntry)
+                    }
+                    else -> member
+                }
+            }
+            state.copy(
+                partyMembers = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.partyMembers,
             )
         }
     }
@@ -1135,6 +1179,7 @@ class MainViewModel : ViewModel() {
                 loaded = true,
                 entries = loadedData.entries,
                 inventoryItems = loadedData.domains.inventoryItems,
+                partyMembers = loadedData.domains.partyMembers,
                 equipmentItems = loadedData.domains.equipmentItems,
                 keyItems = loadedData.domains.keyItems,
                 gashaStates = loadedData.domains.gashaStates,
@@ -1213,12 +1258,65 @@ class MainViewModel : ViewModel() {
 
     private fun parseSaveDomains(gameData: ByteArray): SaveDomains {
         val inventory = inventoryCodec.decode(gameData)
+        val entries = parser.parse(gameData)
         return SaveDomains(
             inventoryItems = inventory.items,
+            partyMembers = buildPartyMembers(gameData, entries),
             equipmentItems = inventory.equipment,
             keyItems = inventory.keyItems,
             gashaStates = gashaCodec.decode(gameData),
             sasuraiResidents = sasuraiCodec.decode(gameData),
+        )
+    }
+
+    private fun buildPartyMembers(gameData: ByteArray, entries: List<YokaiEntry>): List<PartyMemberEntry> {
+        return partyCodec.decode(gameData, entries)
+    }
+
+    private fun refreshPartyMembers(
+        partyMembers: List<PartyMemberEntry>,
+        entries: List<YokaiEntry>,
+    ): List<PartyMemberEntry> {
+        val entriesByHandle = entries.associateBy { it.handle }
+        return partyMembers.map { member ->
+            val entry = entriesByHandle[member.yokaiHandle]
+            if (entry == null) {
+                member
+            } else {
+                PartyMemberEntry(
+                    position = member.position,
+                    yokaiHandle = entry.handle,
+                    yokaiSlot = entry.slot,
+                    yokaiName = entry.name,
+                )
+            }
+        }
+    }
+
+    private fun normalizePartyMembers(
+        partyMembers: List<PartyMemberEntry>,
+        entries: List<YokaiEntry>,
+    ): List<PartyMemberEntry> {
+        val membersByPosition = partyMembers.associateBy { it.position }
+        return (0 until PartyCodec.PARTY_SIZE).map { position ->
+            val member = membersByPosition[position]
+            val entry = member?.let { current ->
+                entries.firstOrNull { it.handle == current.yokaiHandle }
+            }
+            when {
+                entry != null -> partyMemberFromEntry(position, entry)
+                member != null -> member
+                else -> PartyMemberEntry(position, 0L, null, "未設定")
+            }
+        }
+    }
+
+    private fun partyMemberFromEntry(position: Int, entry: YokaiEntry): PartyMemberEntry {
+        return PartyMemberEntry(
+            position = position,
+            yokaiHandle = entry.handle,
+            yokaiSlot = entry.slot,
+            yokaiName = entry.name,
         )
     }
 
@@ -1275,6 +1373,7 @@ private data class LoadedData(
 
 private data class SaveDomains(
     val inventoryItems: List<InventoryItemEntry>,
+    val partyMembers: List<PartyMemberEntry>,
     val equipmentItems: List<EquipmentEntry>,
     val keyItems: List<KeyItemEntry>,
     val gashaStates: List<GashaStateEntry>,

@@ -79,6 +79,7 @@ import com.atuy.yws1editor.ui.theme.YwEditorTheme
 import com.atuy.yws1editor.shizuku.ShizukuFileServiceClient
 import com.atuy.yws1editor.yokai.MainBinBackupInfo
 import com.atuy.yws1editor.yokai.InventoryItemEntry
+import com.atuy.yws1editor.yokai.PartyMemberEntry
 import com.atuy.yws1editor.yokai.EquipmentEntry
 import com.atuy.yws1editor.yokai.KeyItemEntry
 import com.atuy.yws1editor.yokai.GashaStateEntry
@@ -341,6 +342,7 @@ private fun AppScreen(
             onEquipmentKindChange = mainViewModel::updateEquipmentKind,
             onGashaAdvance = mainViewModel::advanceGashaState,
             onGashaAdvanceToPrize = mainViewModel::advanceGashaToPrize,
+            onPartyMemberChange = mainViewModel::updatePartyMember,
             onSasuraiEncounterChange = mainViewModel::updateSasuraiEncounter,
             onPlayHoursChange = mainViewModel::updatePlayHours,
             onPlayMinutesChange = mainViewModel::updatePlayMinutes,
@@ -577,6 +579,7 @@ private fun EditorScreen(
     onEquipmentKindChange: (Int, Long) -> Unit,
     onGashaAdvance: (Int) -> Unit,
     onGashaAdvanceToPrize: (Int, Long) -> Unit,
+    onPartyMemberChange: (Int, Long) -> Unit,
     onSasuraiEncounterChange: (Int, Long) -> Unit,
     onPlayHoursChange: (Int) -> Unit,
     onPlayMinutesChange: (Int) -> Unit,
@@ -753,6 +756,14 @@ private fun EditorScreen(
                     yokaiNames = yokaiOptions.associate { it.id to it.name },
                     enabled = !fileOperationBusy,
                     onEncounterChange = onSasuraiEncounterChange,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                EditorTopTab.Party -> PartyTabContent(
+                    members = state.partyMembers,
+                    entries = state.entries,
+                    enabled = !fileOperationBusy,
+                    onMemberChange = onPartyMemberChange,
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -1493,6 +1504,89 @@ private fun GashaTabContent(
 }
 
 @Composable
+private fun PartyTabContent(
+    members: List<PartyMemberEntry>,
+    entries: List<YokaiEntry>,
+    enabled: Boolean,
+    onMemberChange: (Int, Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val normalizedMembers = remember(members, entries) {
+        val byPosition = members.associateBy { it.position }
+        (0 until 6).map { position ->
+            byPosition[position] ?: PartyMemberEntry(position, 0L, null, "未設定")
+        }
+    }
+
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+            ) {
+                Text(
+                    text = "現在パーティ6枠にセットされている既存妖怪を切り替えます。妖怪の生成・削除は行いません。",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        if (members.isEmpty()) {
+            item { EmptyDomainText("パーティ情報を読み込めませんでした") }
+        } else {
+            items(normalizedMembers, key = { it.position }) { member ->
+                val currentEntry = entries.firstOrNull { it.handle == member.yokaiHandle }
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("枠 ${member.position + 1}", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                currentEntry?.let { "Slot ${it.slot} / Lv.${it.level}" } ?: "未対応handle",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            currentEntry?.name ?: member.yokaiName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        PartyMemberDropdown(
+                            entries = entries,
+                            selectedHandle = member.yokaiHandle,
+                            enabled = enabled && entries.isNotEmpty(),
+                            onSelected = { onMemberChange(member.position, it) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "handle ${formatU32(member.yokaiHandle)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+        item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+@Composable
 private fun SasuraiTabContent(
     residents: List<SasuraiResident>,
     encounterOptions: List<SasuraiEncounterOption>,
@@ -2025,6 +2119,56 @@ private fun ItemKindDropdown(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PartyMemberDropdown(
+    entries: List<YokaiEntry>,
+    selectedHandle: Long,
+    enabled: Boolean,
+    onSelected: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = entries.firstOrNull { it.handle == selectedHandle }
+    val selectedLabel = selected?.let { partyMemberLabel(it) } ?: "未登録 ${formatU32(selectedHandle)}"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled) expanded = !expanded },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            enabled = enabled,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = enabled)
+                .fillMaxWidth(),
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            entries.forEach { entry ->
+                DropdownMenuItem(
+                    text = { Text(partyMemberLabel(entry)) },
+                    onClick = {
+                        onSelected(entry.handle)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun partyMemberLabel(entry: YokaiEntry): String {
+    return "Slot ${entry.slot}: ${entry.name}  Lv.${entry.level}"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
