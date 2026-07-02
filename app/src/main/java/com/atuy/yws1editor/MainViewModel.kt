@@ -833,6 +833,25 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun removePartyMember(position: Int) {
+        if (isFileOperationBusy()) return
+        if (position !in 0 until PartyCodec.PARTY_SIZE) return
+        _uiState.update { state ->
+            val currentMembers = normalizePartyMembers(state.partyMembers, state.entries)
+            val updated = currentMembers.map { member ->
+                if (member.position == position) {
+                    PartyMemberEntry(position, 0L, null, "未設定")
+                } else {
+                    member
+                }
+            }
+            state.copy(
+                partyMembers = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.partyMembers,
+            )
+        }
+    }
+
     fun setCheatMode(enabled: Boolean) {
         if (isFileOperationBusy()) return
         _uiState.update { state ->

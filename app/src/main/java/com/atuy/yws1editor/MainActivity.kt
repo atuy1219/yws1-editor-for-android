@@ -343,6 +343,7 @@ private fun AppScreen(
             onGashaAdvance = mainViewModel::advanceGashaState,
             onGashaAdvanceToPrize = mainViewModel::advanceGashaToPrize,
             onPartyMemberChange = mainViewModel::updatePartyMember,
+            onPartyMemberRemove = mainViewModel::removePartyMember,
             onSasuraiEncounterChange = mainViewModel::updateSasuraiEncounter,
             onPlayHoursChange = mainViewModel::updatePlayHours,
             onPlayMinutesChange = mainViewModel::updatePlayMinutes,
@@ -580,6 +581,7 @@ private fun EditorScreen(
     onGashaAdvance: (Int) -> Unit,
     onGashaAdvanceToPrize: (Int, Long) -> Unit,
     onPartyMemberChange: (Int, Long) -> Unit,
+    onPartyMemberRemove: (Int) -> Unit,
     onSasuraiEncounterChange: (Int, Long) -> Unit,
     onPlayHoursChange: (Int) -> Unit,
     onPlayMinutesChange: (Int) -> Unit,
@@ -764,6 +766,7 @@ private fun EditorScreen(
                     entries = state.entries,
                     enabled = !fileOperationBusy,
                     onMemberChange = onPartyMemberChange,
+                    onMemberRemove = onPartyMemberRemove,
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -1509,6 +1512,7 @@ private fun PartyTabContent(
     entries: List<YokaiEntry>,
     enabled: Boolean,
     onMemberChange: (Int, Long) -> Unit,
+    onMemberRemove: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val normalizedMembers = remember(members, entries) {
@@ -1556,7 +1560,8 @@ private fun PartyTabContent(
                         ) {
                             Text("枠 ${member.position + 1}", fontWeight = FontWeight.SemiBold)
                             Text(
-                                currentEntry?.let { "Slot ${it.slot} / Lv.${it.level}" } ?: "未対応handle",
+                                currentEntry?.let { "Slot ${it.slot} / Lv.${it.level}" }
+                                    ?: if (member.yokaiHandle == 0L) "空き枠" else "未対応handle",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1573,11 +1578,23 @@ private fun PartyTabContent(
                             onSelected = { onMemberChange(member.position, it) },
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Text(
-                            "handle ${formatU32(member.yokaiHandle)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "handle ${formatU32(member.yokaiHandle)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(
+                                onClick = { onMemberRemove(member.position) },
+                                enabled = enabled && member.yokaiHandle != 0L,
+                            ) {
+                                Text("外す")
+                            }
+                        }
                     }
                 }
             }
@@ -2132,7 +2149,8 @@ private fun PartyMemberDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selected = entries.firstOrNull { it.handle == selectedHandle }
-    val selectedLabel = selected?.let { partyMemberLabel(it) } ?: "未登録 ${formatU32(selectedHandle)}"
+    val selectedLabel = selected?.let { partyMemberLabel(it) }
+        ?: if (selectedHandle == 0L) "未設定" else "未登録 ${formatU32(selectedHandle)}"
 
     ExposedDropdownMenuBox(
         expanded = expanded,

@@ -36,6 +36,17 @@ class PartyCodecTest {
     }
 
     @Test
+    fun replacePartyMembersAcceptsEmptySlots() {
+        val originalHandles = listOf(0x00010000L, 0x00020001L, 0x00030002L, 0x00040003L, 0x00050004L, 0x00060005L)
+        val replacementHandles = listOf(0x00010000L, 0L, 0x00030002L, 0L, 0x00050004L, 0x00060005L)
+        val gameData = buildGameData(originalHandles)
+
+        val updated = codec.replacePartyMembers(gameData, replacementHandles)
+
+        assertEquals(replacementHandles, readPartyHandles(updated))
+    }
+
+    @Test
     fun decodeReturnsEmptyWhenPartyBlockIsMissing() {
         assertTrue(codec.decode(ByteArray(32), emptyList()).isEmpty())
     }
