@@ -23,6 +23,8 @@ import com.atuy.yws1editor.yokai.SaveInfo
 import com.atuy.yws1editor.yokai.SaveInfoCodec
 import com.atuy.yws1editor.yokai.Stat5
 import com.atuy.yws1editor.yokai.YokaiAttitude
+import com.atuy.yws1editor.yokai.YokaiEncyclopediaCodec
+import com.atuy.yws1editor.yokai.YokaiEncyclopediaEntry
 import com.atuy.yws1editor.yokai.StatGroup
 import com.atuy.yws1editor.yokai.YokaiEntry
 import com.atuy.yws1editor.yokai.YokaiMasterData
@@ -122,6 +124,7 @@ data class EditorUiState(
     val gashaPrizeEntries: List<GashaPrizeEntry> = emptyList(),
     val sasuraiResidents: List<SasuraiResident> = emptyList(),
     val sasuraiEncounterOptions: List<SasuraiEncounterOption> = emptyList(),
+    val encyclopediaEntries: List<YokaiEncyclopediaEntry> = emptyList(),
     val itemNames: Map<Long, String> = emptyMap(),
     val equipmentNames: Map<Long, String> = emptyMap(),
     val keyItemNames: Map<Long, String> = emptyMap(),
@@ -163,6 +166,7 @@ class MainViewModel : ViewModel() {
     private val gashaCodec = GashaStateCodec()
     private var gashaPredictor = GashaPredictor(emptyList())
     private val sasuraiCodec = SasuraiCodec()
+    private val encyclopediaCodec = YokaiEncyclopediaCodec()
     private var masterData = YokaiMasterData.EMPTY
     private var saveDomainMasterData = SaveDomainMasterData.EMPTY
     private var parser = YokaiParser(masterData)
@@ -221,9 +225,15 @@ class MainViewModel : ViewModel() {
                 }
 
                 _uiState.update {
+                    val refreshedEncyclopediaEntries = if (it.encyclopediaEntries.isEmpty()) {
+                        encyclopediaCodec.decode(section.decryptedData, masterData)
+                    } else {
+                        refreshEncyclopediaEntries(it.encyclopediaEntries)
+                    }
                     it.copy(
                         entries = refreshedEntries,
                         partyMembers = refreshPartyMembers(it.partyMembers, refreshedEntries),
+                        encyclopediaEntries = refreshedEncyclopediaEntries,
                         attitudes = masterData.attitudes,
                         selectedSlot = currentSlot?.takeIf { slot ->
                             refreshedEntries.any { entry -> entry.slot == slot }
@@ -260,6 +270,7 @@ class MainViewModel : ViewModel() {
                             keyItems = emptyList(),
                             gashaStates = emptyList(),
                             sasuraiResidents = emptyList(),
+                            encyclopediaEntries = emptyList(),
                             safeItemQuantityCeilings = emptyMap(),
                             expandedYokaiSlot = null,
                             selectedSlot = null,
@@ -445,8 +456,12 @@ class MainViewModel : ViewModel() {
                                 )
                             }
                         }
+                        val withEncyclopedia = encyclopediaCodec.applyEntries(
+                            gameData = withSasurai,
+                            entries = snapshot.encyclopediaEntries,
+                        )
                         val writeResult = SaveInfoCodec.apply(
-                            baseGameData = withSasurai,
+                            baseGameData = withEncyclopedia,
                             baseHeadData = headSection.decryptedData,
                             sectionName = sectionName,
                             info = saveInfo,
@@ -496,6 +511,7 @@ class MainViewModel : ViewModel() {
                     keyItems = emptyList(),
                     gashaStates = emptyList(),
                     sasuraiResidents = emptyList(),
+                    encyclopediaEntries = emptyList(),
                     safeItemQuantityCeilings = emptyMap(),
                     expandedYokaiSlot = null,
                     selectedSlot = null,
@@ -523,6 +539,7 @@ class MainViewModel : ViewModel() {
                 gashaStates = domains.gashaStates,
                 gashaPrizeEntries = saveDomainMasterData.gashaPrizeEntries,
                 sasuraiResidents = domains.sasuraiResidents,
+                encyclopediaEntries = domains.encyclopediaEntries,
                 safeItemQuantityCeilings = safeQuantityCeilings(domains.inventoryItems),
                 attitudes = masterData.attitudes,
                 expandedYokaiSlot = null,
@@ -802,6 +819,73 @@ class MainViewModel : ViewModel() {
                 sasuraiResidents = updated,
                 hasUnsavedChanges = state.hasUnsavedChanges ||
                     updated.map { it.encounterId } != state.sasuraiResidents.map { it.encounterId },
+            )
+        }
+    }
+
+    fun updateEncyclopediaMet(yokaiId: Long, met: Boolean) {
+        if (isFileOperationBusy()) return
+        _uiState.update { state ->
+            val updated = state.encyclopediaEntries.map { entry ->
+                if (entry.id == yokaiId) {
+                    if (met) entry.copy(met = true) else entry.copy(met = false, owned = false, isNew = false)
+                } else {
+                    entry
+                }
+            }
+            state.copy(
+                encyclopediaEntries = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.encyclopediaEntries,
+            )
+        }
+    }
+
+    fun updateEncyclopediaOwned(yokaiId: Long, owned: Boolean) {
+        if (isFileOperationBusy()) return
+        _uiState.update { state ->
+            val updated = state.encyclopediaEntries.map { entry ->
+                if (entry.id == yokaiId) {
+                    if (owned) entry.copy(met = true, owned = true) else entry.copy(owned = false)
+                } else {
+                    entry
+                }
+            }
+            state.copy(
+                encyclopediaEntries = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.encyclopediaEntries,
+            )
+        }
+    }
+
+    fun updateEncyclopediaNew(yokaiId: Long, isNew: Boolean) {
+        if (isFileOperationBusy()) return
+        _uiState.update { state ->
+            val updated = state.encyclopediaEntries.map { entry ->
+                if (entry.id == yokaiId) {
+                    if (isNew) entry.copy(met = true, isNew = true) else entry.copy(isNew = false)
+                } else {
+                    entry
+                }
+            }
+            state.copy(
+                encyclopediaEntries = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.encyclopediaEntries,
+            )
+        }
+    }
+
+    fun syncEncyclopediaFromOwnedYokai() {
+        if (isFileOperationBusy()) return
+        _uiState.update { state ->
+            val ownedIds = state.entries.map { it.id }.toSet()
+            if (ownedIds.isEmpty()) return@update state
+            val updated = state.encyclopediaEntries.map { entry ->
+                if (entry.id in ownedIds) entry.copy(met = true, owned = true) else entry
+            }
+            state.copy(
+                encyclopediaEntries = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.encyclopediaEntries,
+                message = "所持妖怪を妖怪大辞典へ反映しました",
             )
         }
     }
@@ -1204,6 +1288,7 @@ class MainViewModel : ViewModel() {
                 gashaStates = loadedData.domains.gashaStates,
                 gashaPrizeEntries = saveDomainMasterData.gashaPrizeEntries,
                 sasuraiResidents = loadedData.domains.sasuraiResidents,
+                encyclopediaEntries = loadedData.domains.encyclopediaEntries,
                 sasuraiEncounterOptions = saveDomainMasterData.sasuraiEncounterOptions,
                 itemNames = saveDomainMasterData.itemNames,
                 equipmentNames = saveDomainMasterData.equipmentNames,
@@ -1285,6 +1370,7 @@ class MainViewModel : ViewModel() {
             keyItems = inventory.keyItems,
             gashaStates = gashaCodec.decode(gameData),
             sasuraiResidents = sasuraiCodec.decode(gameData),
+            encyclopediaEntries = encyclopediaCodec.decode(gameData, masterData),
         )
     }
 
@@ -1310,6 +1396,16 @@ class MainViewModel : ViewModel() {
                 )
             }
         }
+    }
+
+    private fun refreshEncyclopediaEntries(
+        entries: List<YokaiEncyclopediaEntry>,
+    ): List<YokaiEncyclopediaEntry> {
+        return entries.mapNotNull { entry ->
+            val name = masterData.nameById[entry.id] ?: return@mapNotNull null
+            val number = masterData.numberById[entry.id] ?: return@mapNotNull null
+            entry.copy(name = name, number = number)
+        }.sortedBy { it.number }
     }
 
     private fun normalizePartyMembers(
@@ -1397,6 +1493,7 @@ private data class SaveDomains(
     val keyItems: List<KeyItemEntry>,
     val gashaStates: List<GashaStateEntry>,
     val sasuraiResidents: List<SasuraiResident>,
+    val encyclopediaEntries: List<YokaiEncyclopediaEntry>,
 )
 
 private data class StartupLoadData(

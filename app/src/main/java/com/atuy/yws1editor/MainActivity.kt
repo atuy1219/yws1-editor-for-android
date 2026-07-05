@@ -94,6 +94,7 @@ import com.atuy.yws1editor.yokai.ShizukuFileGateway
 import com.atuy.yws1editor.yokai.Stat5
 import com.atuy.yws1editor.yokai.StatGroup
 import com.atuy.yws1editor.yokai.YokaiAttitude
+import com.atuy.yws1editor.yokai.YokaiEncyclopediaEntry
 import com.atuy.yws1editor.yokai.YokaiEntry
 import com.atuy.yws1editor.yokai.YokaiMasterLoader
 import com.atuy.yws1editor.yokai.YokaiStatusCalculator
@@ -345,6 +346,10 @@ private fun AppScreen(
             onPartyMemberChange = mainViewModel::updatePartyMember,
             onPartyMemberRemove = mainViewModel::removePartyMember,
             onSasuraiEncounterChange = mainViewModel::updateSasuraiEncounter,
+            onEncyclopediaMetChange = mainViewModel::updateEncyclopediaMet,
+            onEncyclopediaOwnedChange = mainViewModel::updateEncyclopediaOwned,
+            onEncyclopediaNewChange = mainViewModel::updateEncyclopediaNew,
+            onSyncEncyclopediaFromOwnedYokai = mainViewModel::syncEncyclopediaFromOwnedYokai,
             onPlayHoursChange = mainViewModel::updatePlayHours,
             onPlayMinutesChange = mainViewModel::updatePlayMinutes,
             onMoneyChange = mainViewModel::updateMoney,
@@ -583,6 +588,10 @@ private fun EditorScreen(
     onPartyMemberChange: (Int, Long) -> Unit,
     onPartyMemberRemove: (Int) -> Unit,
     onSasuraiEncounterChange: (Int, Long) -> Unit,
+    onEncyclopediaMetChange: (Long, Boolean) -> Unit,
+    onEncyclopediaOwnedChange: (Long, Boolean) -> Unit,
+    onEncyclopediaNewChange: (Long, Boolean) -> Unit,
+    onSyncEncyclopediaFromOwnedYokai: () -> Unit,
     onPlayHoursChange: (Int) -> Unit,
     onPlayMinutesChange: (Int) -> Unit,
     onMoneyChange: (Int) -> Unit,
@@ -761,17 +770,22 @@ private fun EditorScreen(
                     modifier = Modifier.fillMaxSize(),
                 )
 
+                EditorTopTab.Encyclopedia -> EncyclopediaTabContent(
+                    entries = state.encyclopediaEntries,
+                    enabled = !fileOperationBusy,
+                    onMetChange = onEncyclopediaMetChange,
+                    onOwnedChange = onEncyclopediaOwnedChange,
+                    onNewChange = onEncyclopediaNewChange,
+                    onSyncFromOwnedYokai = onSyncEncyclopediaFromOwnedYokai,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
                 EditorTopTab.Party -> PartyTabContent(
                     members = state.partyMembers,
                     entries = state.entries,
                     enabled = !fileOperationBusy,
                     onMemberChange = onPartyMemberChange,
                     onMemberRemove = onPartyMemberRemove,
-                    modifier = Modifier.fillMaxSize(),
-                )
-
-                else -> PlaceholderTabContent(
-                    tab = state.selectedTopTab,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1184,19 +1198,6 @@ private fun parseDateFromInput(value: String): Long? {
     val formatter = SimpleDateFormat("yyyyMMddHHmm", Locale.JAPAN)
     formatter.isLenient = false
     return runCatching { formatter.parse(value)?.time }.getOrNull()
-}
-
-@Composable
-private fun PlaceholderTabContent(
-    tab: EditorTopTab,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("${tab.label}は未実装です")
-    }
 }
 
 @Composable
@@ -1656,6 +1657,160 @@ private fun SasuraiTabContent(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun EncyclopediaTabContent(
+    entries: List<YokaiEncyclopediaEntry>,
+    enabled: Boolean,
+    onMetChange: (Long, Boolean) -> Unit,
+    onOwnedChange: (Long, Boolean) -> Unit,
+    onNewChange: (Long, Boolean) -> Unit,
+    onSyncFromOwnedYokai: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var query by remember { mutableStateOf("") }
+    var onlyMissing by remember { mutableStateOf(false) }
+    val normalizedQuery = query.trim().lowercase(Locale.JAPAN)
+    val filtered = remember(entries, normalizedQuery, onlyMissing) {
+        entries.filter { entry ->
+            val matchesQuery = normalizedQuery.isBlank() ||
+                entry.name.lowercase(Locale.JAPAN).contains(normalizedQuery) ||
+                entry.number.toString().contains(normalizedQuery) ||
+                formatU32(entry.id).lowercase(Locale.JAPAN).contains(normalizedQuery)
+            matchesQuery && (!onlyMissing || !entry.owned)
+        }
+    }
+    val metCount = entries.count { it.met }
+    val ownedCount = entries.count { it.owned }
+    val newCount = entries.count { it.isNew }
+
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "遭遇 $metCount/${entries.size}  •  所持 $ownedCount/${entries.size}  •  NEW $newCount",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(
+                        onClick = onSyncFromOwnedYokai,
+                        enabled = enabled && entries.isNotEmpty(),
+                    ) {
+                        Text("現在の妖怪を反映")
+                    }
+                }
+            }
+        }
+        item {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                label = { Text("検索") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = onlyMissing,
+                    onCheckedChange = { onlyMissing = it },
+                )
+                Text("未所持のみ")
+            }
+        }
+        if (entries.isEmpty()) {
+            item { EmptyDomainText("妖怪大辞典を読み込めませんでした") }
+        } else if (filtered.isEmpty()) {
+            item { EmptyDomainText("表示する妖怪がありません") }
+        }
+        items(filtered, key = { it.id }) { entry ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(entry.name, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "No.${entry.number}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        formatU32(entry.id),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        EncyclopediaCheckbox(
+                            label = "遭遇",
+                            checked = entry.met,
+                            enabled = enabled,
+                            onCheckedChange = { onMetChange(entry.id, it) },
+                        )
+                        EncyclopediaCheckbox(
+                            label = "所持",
+                            checked = entry.owned,
+                            enabled = enabled,
+                            onCheckedChange = { onOwnedChange(entry.id, it) },
+                        )
+                        EncyclopediaCheckbox(
+                            label = "NEW",
+                            checked = entry.isNew,
+                            enabled = enabled,
+                            onCheckedChange = { onNewChange(entry.id, it) },
+                        )
+                    }
+                }
+            }
+        }
+        item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+@Composable
+private fun EncyclopediaCheckbox(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange,
+        )
+        Text(label, style = MaterialTheme.typography.bodySmall)
     }
 }
 

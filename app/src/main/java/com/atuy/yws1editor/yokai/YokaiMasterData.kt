@@ -16,12 +16,14 @@ data class YokaiAttitude(
 
 data class YokaiMasterData(
     val nameById: Map<Long, String>,
+    val numberById: Map<Long, Int>,
     val detailById: Map<Long, YokaiMasterDetail>,
     val attitudes: List<YokaiAttitude>,
 ) {
     companion object {
         val EMPTY = YokaiMasterData(
             nameById = emptyMap(),
+            numberById = emptyMap(),
             detailById = emptyMap(),
             attitudes = emptyList(),
         )
@@ -109,10 +111,14 @@ object YokaiMasterLoader {
                 detailByNumber[num]?.let { id to it }
             }.toMap()
 
-            YokaiMasterData(nameById = nameById, detailById = detailById, attitudes = fixedAttitudes)
+            YokaiMasterData(
+                nameById = nameById,
+                numberById = numberById,
+                detailById = detailById,
+                attitudes = fixedAttitudes,
+            )
         }.getOrElse {
             YokaiMasterData.EMPTY
         }
     }
 }
-
