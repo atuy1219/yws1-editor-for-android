@@ -34,11 +34,21 @@ class PartyCodec {
     }
 
     /**
-     * Rebuilds the six active slots using the same effective operation as
-     * ywPartyCollection::Swap: handles are exchanged inside the complete
-     * 241-slot collection instead of overwriting only the active slots.
+     * Rebuilds the six active slots using the same effective operations as
+     * ywPartyCollection::Add and ywPartyCollection::Swap. Handles already in
+     * the 241-slot collection are swapped. A valid character handle dropped
+     * by an older editor is first restored into an empty slot, then swapped.
      */
     fun replacePartyMembers(gameData: ByteArray, handles: List<Long>): ByteArray {
+        val validHandles = YokaiParser().parse(gameData).map { it.handle }
+        return replacePartyMembers(gameData, handles, validHandles)
+    }
+
+    fun replacePartyMembers(
+        gameData: ByteArray,
+        handles: List<Long>,
+        validHandles: Collection<Long>,
+    ): ByteArray {
         val collection = findPartyCollection(gameData)
             ?: throw IOException("パーティ領域が見つかりません")
         requireCollectionSize(gameData, collection)
@@ -47,27 +57,48 @@ class PartyCodec {
             handles.getOrElse(position) { 0L }.normalizedU32()
         }
         validateDesiredParty(desired)
+        val normalizedValidHandles = validHandles.asSequence()
+            .map { it.normalizedU32() }
+            .filter { it != 0L }
+            .toSet()
 
         val slots = MutableList(COLLECTION_SIZE) { index ->
             readUInt32Le(gameData, collection.payloadOffset + index * Int.SIZE_BYTES)
         }
-        val originalCounts = slots.groupingBy { it }.eachCount()
+        val expectedCounts = slots.groupingBy { it }.eachCount().toMutableMap()
 
         repeat(PARTY_SIZE) { position ->
             val wanted = desired[position]
             if (slots[position] == wanted) return@repeat
 
             val sourcePosition = findSwapSource(slots, position, wanted)
-            val displaced = slots[position]
-            slots[position] = slots[sourcePosition]
-            slots[sourcePosition] = displaced
+            if (sourcePosition != null) {
+                slots.swap(position, sourcePosition)
+                return@repeat
+            }
+
+            if (wanted == 0L) {
+                throw IOException("パーティから外すための空き枠がありません")
+            }
+            if (wanted !in normalizedValidHandles) {
+                throw IOException("指定された妖怪 ${formatU32(wanted)} は妖怪スロットに存在しません")
+            }
+
+            val emptyPosition = findRepairSlot(slots, position)
+                ?: throw IOException("指定された妖怪 ${formatU32(wanted)} の所属を復元する空き枠がありません")
+            slots[emptyPosition] = wanted
+            expectedCounts[0L] = expectedCounts.getValue(0L) - 1
+            expectedCounts[wanted] = expectedCounts.getOrDefault(wanted, 0) + 1
+            if (emptyPosition != position) {
+                slots.swap(position, emptyPosition)
+            }
         }
 
         if (slots.take(PARTY_SIZE) != desired) {
             throw IOException("パーティの並び替えに失敗しました")
         }
-        if (slots.groupingBy { it }.eachCount() != originalCounts) {
-            throw IOException("パーティ変更により所属ハンドルの集合が変化しました")
+        if (slots.groupingBy { it }.eachCount() != expectedCounts.filterValues { it != 0 }) {
+            throw IOException("パーティ変更により所属ハンドルの集合が不正に変化しました")
         }
 
         val out = gameData.copyOf()
@@ -90,20 +121,36 @@ class PartyCodec {
         }
     }
 
-    private fun findSwapSource(slots: List<Long>, targetPosition: Int, wanted: Long): Int {
+    private fun findSwapSource(slots: List<Long>, targetPosition: Int, wanted: Long): Int? {
         if (wanted == 0L) {
             return (PARTY_SIZE until COLLECTION_SIZE).firstOrNull { slots[it] == 0L }
-                ?: throw IOException("控えに空きがないためパーティから外せません")
+                ?: (0 until PARTY_SIZE).firstOrNull {
+                    it != targetPosition && slots[it] == 0L
+                }
         }
 
-        // Prefer the reserve occurrence. This also avoids disturbing another
-        // active slot when reading a previously corrupted save with duplicates.
+        // Prefer the reserve occurrence. This avoids disturbing another active
+        // slot when reading a previously corrupted save with duplicates.
         val reservePosition = (PARTY_SIZE until COLLECTION_SIZE).firstOrNull { slots[it] == wanted }
         if (reservePosition != null) return reservePosition
 
         return (0 until PARTY_SIZE).firstOrNull {
             it != targetPosition && slots[it] == wanted
-        } ?: throw IOException("指定された妖怪 ${formatU32(wanted)} は所属一覧に存在しません")
+        }
+    }
+
+    private fun findRepairSlot(slots: List<Long>, targetPosition: Int): Int? {
+        if (slots[targetPosition] == 0L) return targetPosition
+        return (PARTY_SIZE until COLLECTION_SIZE).firstOrNull { slots[it] == 0L }
+            ?: (0 until PARTY_SIZE).firstOrNull {
+                it != targetPosition && slots[it] == 0L
+            }
+    }
+
+    private fun MutableList<Long>.swap(first: Int, second: Int) {
+        val value = this[first]
+        this[first] = this[second]
+        this[second] = value
     }
 
     private fun findPartyCollection(gameData: ByteArray): PartyCollection? {
