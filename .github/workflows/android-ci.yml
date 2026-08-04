@@ -25,19 +25,24 @@ jobs:
           from pathlib import Path
 
           path = Path("app/src/main/java/com/atuy/yws1editor/MainViewModel.kt")
-          source = path.read_text()
-          old_member = "            val previousHandle = currentMembers[position].yokaiHandle\n"
-          new_member = "            val previousMember = currentMembers[position]\n"
-          old_swap = """                    swappedPosition -> {
-                                  val previousEntry = state.entries.firstOrNull { it.handle == previousHandle }
-                                  if (previousEntry == null) member else partyMemberFromEntry(member.position, previousEntry)
-                              }
-          """
-          new_swap = "                    swappedPosition -> previousMember.copy(position = member.position)\n"
-          if source.count(old_member) != 1 or source.count(old_swap) != 1:
+          lines = path.read_text().splitlines(keepends=True)
+          member_indexes = [i for i, line in enumerate(lines) if "val previousHandle = currentMembers[position].yokaiHandle" in line]
+          swap_indexes = [i for i, line in enumerate(lines) if "swappedPosition -> {" in line]
+          if len(member_indexes) != 1 or len(swap_indexes) != 1:
               raise SystemExit("MainViewModel target block was not found exactly once")
-          source = source.replace(old_member, new_member, 1).replace(old_swap, new_swap, 1)
-          path.write_text(source)
+          member_index = member_indexes[0]
+          swap_index = swap_indexes[0]
+          if "val previousEntry =" not in lines[swap_index + 1] or "if (previousEntry == null)" not in lines[swap_index + 2]:
+              raise SystemExit("MainViewModel swap block has an unexpected shape")
+          lines[member_index] = lines[member_index].replace(
+              "val previousHandle = currentMembers[position].yokaiHandle",
+              "val previousMember = currentMembers[position]",
+          )
+          indent = lines[swap_index].split("swappedPosition", 1)[0]
+          lines[swap_index:swap_index + 4] = [
+              f"{indent}swappedPosition -> previousMember.copy(position = member.position)\n"
+          ]
+          path.write_text("".join(lines))
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
