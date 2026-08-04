@@ -896,17 +896,14 @@ class MainViewModel : ViewModel() {
         _uiState.update { state ->
             val selectedEntry = state.entries.firstOrNull { it.handle == yokaiHandle } ?: return@update state
             val currentMembers = normalizePartyMembers(state.partyMembers, state.entries)
-            val previousHandle = currentMembers[position].yokaiHandle
+            val previousMember = currentMembers[position]
             val swappedPosition = currentMembers.indexOfFirst {
                 it.position != position && it.yokaiHandle == yokaiHandle
             }
             val updated = currentMembers.map { member ->
                 when (member.position) {
                     position -> partyMemberFromEntry(member.position, selectedEntry)
-                    swappedPosition -> {
-                        val previousEntry = state.entries.firstOrNull { it.handle == previousHandle }
-                        if (previousEntry == null) member else partyMemberFromEntry(member.position, previousEntry)
-                    }
+                    swappedPosition -> previousMember.copy(position = member.position)
                     else -> member
                 }
             }

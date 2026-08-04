@@ -5,6 +5,7 @@ import java.io.IOException
 class PartyCodec {
     companion object {
         const val PARTY_SIZE = 6
+        private const val COLLECTION_SIZE = 241
         private const val BLOCK_MARKER = 0x0000FFFE
         private const val OUTER_TAG = 0xF1
         private const val DATASET_TAG = 0xF3
@@ -12,18 +13,16 @@ class PartyCodec {
         private const val PARTY_COLLECTION_TAG = 0x0A
         private const val BLOCK_HEADER_SIZE = 8
         private const val BLOCK_TRAILER_SIZE = 4
-        private const val PARTY_HANDLES_SIZE = PARTY_SIZE * Int.SIZE_BYTES
+        private const val COLLECTION_HANDLES_SIZE = COLLECTION_SIZE * Int.SIZE_BYTES
     }
 
     fun decode(gameData: ByteArray, entries: List<YokaiEntry>): List<PartyMemberEntry> {
-        val payloadOffset = findPartyCollectionPayload(gameData) ?: return emptyList()
-        if (payloadOffset + PARTY_HANDLES_SIZE > gameData.size) {
-            throw IOException("パーティ領域が短すぎます")
-        }
+        val collection = findPartyCollection(gameData) ?: return emptyList()
+        requireCollectionSize(gameData, collection)
 
         val entriesByHandle = entries.associateBy { it.handle }
         return (0 until PARTY_SIZE).map { position ->
-            val handle = readUInt32Le(gameData, payloadOffset + position * Int.SIZE_BYTES)
+            val handle = readUInt32Le(gameData, collection.payloadOffset + position * Int.SIZE_BYTES)
             val entry = entriesByHandle[handle]
             PartyMemberEntry(
                 position = position,
@@ -34,25 +33,84 @@ class PartyCodec {
         }
     }
 
+    /**
+     * Rebuilds the six active slots using the same effective operation as
+     * ywPartyCollection::Swap: handles are exchanged inside the complete
+     * 241-slot collection instead of overwriting only the active slots.
+     */
     fun replacePartyMembers(gameData: ByteArray, handles: List<Long>): ByteArray {
-        val payloadOffset = findPartyCollectionPayload(gameData)
+        val collection = findPartyCollection(gameData)
             ?: throw IOException("パーティ領域が見つかりません")
-        if (payloadOffset + PARTY_HANDLES_SIZE > gameData.size) {
-            throw IOException("パーティ領域が短すぎます")
+        requireCollectionSize(gameData, collection)
+
+        val desired = List(PARTY_SIZE) { position ->
+            handles.getOrElse(position) { 0L }.normalizedU32()
+        }
+        validateDesiredParty(desired)
+
+        val slots = MutableList(COLLECTION_SIZE) { index ->
+            readUInt32Le(gameData, collection.payloadOffset + index * Int.SIZE_BYTES)
+        }
+        val originalCounts = slots.groupingBy { it }.eachCount()
+
+        repeat(PARTY_SIZE) { position ->
+            val wanted = desired[position]
+            if (slots[position] == wanted) return@repeat
+
+            val sourcePosition = findSwapSource(slots, position, wanted)
+            val displaced = slots[position]
+            slots[position] = slots[sourcePosition]
+            slots[sourcePosition] = displaced
+        }
+
+        if (slots.take(PARTY_SIZE) != desired) {
+            throw IOException("パーティの並び替えに失敗しました")
+        }
+        if (slots.groupingBy { it }.eachCount() != originalCounts) {
+            throw IOException("パーティ変更により所属ハンドルの集合が変化しました")
         }
 
         val out = gameData.copyOf()
-        repeat(PARTY_SIZE) { position ->
-            writeUInt32Le(out, payloadOffset + position * Int.SIZE_BYTES, handles.getOrElse(position) { 0L })
+        slots.forEachIndexed { index, handle ->
+            writeUInt32Le(out, collection.payloadOffset + index * Int.SIZE_BYTES, handle)
         }
         return out
     }
 
-    private fun findPartyCollectionPayload(gameData: ByteArray): Int? {
+    private fun validateDesiredParty(desired: List<Long>) {
+        val duplicate = desired.asSequence()
+            .filter { it != 0L }
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .firstOrNull { it.value > 1 }
+            ?.key
+        if (duplicate != null) {
+            throw IOException("同じ妖怪 ${formatU32(duplicate)} を複数のパーティ枠には設定できません")
+        }
+    }
+
+    private fun findSwapSource(slots: List<Long>, targetPosition: Int, wanted: Long): Int {
+        if (wanted == 0L) {
+            return (PARTY_SIZE until COLLECTION_SIZE).firstOrNull { slots[it] == 0L }
+                ?: throw IOException("控えに空きがないためパーティから外せません")
+        }
+
+        // Prefer the reserve occurrence. This also avoids disturbing another
+        // active slot when reading a previously corrupted save with duplicates.
+        val reservePosition = (PARTY_SIZE until COLLECTION_SIZE).firstOrNull { slots[it] == wanted }
+        if (reservePosition != null) return reservePosition
+
+        return (0 until PARTY_SIZE).firstOrNull {
+            it != targetPosition && slots[it] == wanted
+        } ?: throw IOException("指定された妖怪 ${formatU32(wanted)} は所属一覧に存在しません")
+    }
+
+    private fun findPartyCollection(gameData: ByteArray): PartyCollection? {
         val outer = readBlockHeaderOrNull(gameData, 0) ?: return null
         if (outer.tag != OUTER_TAG) return null
 
-        val outerPayload = 0 + BLOCK_HEADER_SIZE
+        val outerPayload = BLOCK_HEADER_SIZE
         val outerEnd = checkedBlockPayloadEnd(gameData, 0, outer.size)
         val dataset = findChildBlock(gameData, outerPayload, outerEnd, DATASET_TAG) ?: return null
         val datasetPayload = dataset.offset + BLOCK_HEADER_SIZE
@@ -61,7 +119,20 @@ class PartyCodec {
         val partyPayload = party.offset + BLOCK_HEADER_SIZE
         val partyEnd = checkedBlockPayloadEnd(gameData, party.offset, party.size)
         val collection = findChildBlock(gameData, partyPayload, partyEnd, PARTY_COLLECTION_TAG) ?: return null
-        return collection.offset + BLOCK_HEADER_SIZE
+        return PartyCollection(
+            payloadOffset = collection.offset + BLOCK_HEADER_SIZE,
+            payloadSize = collection.size,
+        )
+    }
+
+    private fun requireCollectionSize(data: ByteArray, collection: PartyCollection) {
+        if (collection.payloadSize < COLLECTION_HANDLES_SIZE) {
+            throw IOException("パーティ所属領域が短すぎます")
+        }
+        val end = collection.payloadOffset.toLong() + COLLECTION_HANDLES_SIZE
+        if (end > data.size.toLong()) {
+            throw IOException("パーティ所属領域が範囲外です")
+        }
     }
 
     private fun findChildBlock(data: ByteArray, start: Int, endExclusive: Int, tag: Int): BlockHeader? {
@@ -111,6 +182,8 @@ class PartyCodec {
         return toInt()
     }
 
+    private fun Long.normalizedU32(): Long = this and 0xFFFFFFFFL
+
     private fun readUInt32Le(data: ByteArray, offset: Int): Long {
         if (offset < 0 || offset + Int.SIZE_BYTES > data.size) {
             throw IOException("パーティ領域の読み込み位置が範囲外です")
@@ -132,7 +205,12 @@ class PartyCodec {
         data[offset + 3] = ((v ushr 24) and 0xFF).toByte()
     }
 
-    private fun formatU32(value: Long): String = "0x%08X".format(value and 0xFFFFFFFFL)
+    private fun formatU32(value: Long): String = "0x%08X".format(value.normalizedU32())
+
+    private data class PartyCollection(
+        val payloadOffset: Int,
+        val payloadSize: Int,
+    )
 
     private data class BlockHeader(
         val offset: Int,

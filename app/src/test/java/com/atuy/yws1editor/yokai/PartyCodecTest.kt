@@ -1,7 +1,9 @@
 package com.atuy.yws1editor.yokai
 
+import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class PartyCodecTest {
@@ -9,8 +11,8 @@ class PartyCodecTest {
 
     @Test
     fun decodeReadsCurrentPartyHandles() {
-        val handles = listOf(0x00010000L, 0x00020001L, 0x00030002L, 0x00040003L, 0x00050004L, 0x00060005L)
-        val gameData = buildGameData(handles)
+        val handles = handles(1, 2, 3, 4, 5, 6)
+        val gameData = buildGameData(collection(active = handles))
         val entries = handles.mapIndexed { index, handle ->
             entry(slot = index, handle = handle, name = "妖怪$index")
         }
@@ -24,31 +26,119 @@ class PartyCodecTest {
     }
 
     @Test
-    fun replacePartyMembersUpdatesOnlyCurrentPartyHandles() {
-        val originalHandles = listOf(0x00010000L, 0x00020001L, 0x00030002L, 0x00040003L, 0x00050004L, 0x00060005L)
+    fun replacePartyMembersReordersActiveSlotsWithoutChangingCollectionMembers() {
+        val originalHandles = handles(1, 2, 3, 4, 5, 6)
         val replacementHandles = originalHandles.reversed()
-        val gameData = buildGameData(originalHandles)
+        val originalCollection = collection(active = originalHandles)
+        val gameData = buildGameData(originalCollection)
 
         val updated = codec.replacePartyMembers(gameData, replacementHandles)
+        val updatedCollection = readCollectionHandles(updated)
 
-        assertEquals(replacementHandles, readPartyHandles(updated))
-        assertEquals(0x7F7F7F7FL, readUInt32Le(updated, partyPayloadOffset() + 6 * Int.SIZE_BYTES))
+        assertEquals(replacementHandles, updatedCollection.take(PartyCodec.PARTY_SIZE))
+        assertEquals(originalCollection.groupingBy { it }.eachCount(), updatedCollection.groupingBy { it }.eachCount())
     }
 
     @Test
-    fun replacePartyMembersAcceptsEmptySlots() {
-        val originalHandles = listOf(0x00010000L, 0x00020001L, 0x00030002L, 0x00040003L, 0x00050004L, 0x00060005L)
-        val replacementHandles = listOf(0x00010000L, 0L, 0x00030002L, 0L, 0x00050004L, 0x00060005L)
-        val gameData = buildGameData(originalHandles)
+    fun replacePartyMembersSwapsReserveMemberWithDisplacedPartyMember() {
+        val originalParty = handles(1, 2, 3, 4, 5, 6)
+        val reserveMember = handle(7)
+        val originalCollection = collection(
+            active = originalParty,
+            reserve = listOf(reserveMember),
+        )
+        val replacement = listOf(
+            reserveMember,
+            originalParty[1],
+            originalParty[2],
+            originalParty[3],
+            originalParty[4],
+            originalParty[5],
+        )
 
-        val updated = codec.replacePartyMembers(gameData, replacementHandles)
+        val updated = codec.replacePartyMembers(buildGameData(originalCollection), replacement)
+        val updatedCollection = readCollectionHandles(updated)
 
-        assertEquals(replacementHandles, readPartyHandles(updated))
+        assertEquals(replacement, updatedCollection.take(PartyCodec.PARTY_SIZE))
+        assertEquals(originalParty[0], updatedCollection[PartyCodec.PARTY_SIZE])
+        assertEquals(originalCollection.groupingBy { it }.eachCount(), updatedCollection.groupingBy { it }.eachCount())
+    }
+
+    @Test
+    fun replacePartyMembersMovesRemovedMemberToEmptyReserveSlot() {
+        val originalParty = handles(1, 2, 3, 4, 5, 6)
+        val originalCollection = collection(active = originalParty)
+        val replacement = listOf(
+            originalParty[0],
+            0L,
+            originalParty[2],
+            originalParty[3],
+            originalParty[4],
+            originalParty[5],
+        )
+
+        val updated = codec.replacePartyMembers(buildGameData(originalCollection), replacement)
+        val updatedCollection = readCollectionHandles(updated)
+
+        assertEquals(replacement, updatedCollection.take(PartyCodec.PARTY_SIZE))
+        assertEquals(originalParty[1], updatedCollection[PartyCodec.PARTY_SIZE])
+        assertEquals(originalCollection.groupingBy { it }.eachCount(), updatedCollection.groupingBy { it }.eachCount())
+    }
+
+    @Test
+    fun replacePartyMembersRejectsDuplicatePartyHandles() {
+        val originalParty = handles(1, 2, 3, 4, 5, 6)
+        val duplicateParty = listOf(
+            originalParty[0],
+            originalParty[0],
+            originalParty[2],
+            originalParty[3],
+            originalParty[4],
+            originalParty[5],
+        )
+
+        assertIOExceptionContains("複数のパーティ枠") {
+            codec.replacePartyMembers(buildGameData(collection(active = originalParty)), duplicateParty)
+        }
+    }
+
+    @Test
+    fun replacePartyMembersRejectsHandleOutsidePartyCollection() {
+        val originalParty = handles(1, 2, 3, 4, 5, 6)
+        val replacement = originalParty.toMutableList().apply { this[0] = handle(99) }
+
+        assertIOExceptionContains("所属一覧に存在しません") {
+            codec.replacePartyMembers(buildGameData(collection(active = originalParty)), replacement)
+        }
+    }
+
+    @Test
+    fun replacePartyMembersDoesNotIncreaseDuplicatesInPreviouslyCorruptedCollection() {
+        val originalCollection = collection(
+            active = listOf(handle(1), handle(2), handle(3), handle(4), handle(4), handle(6)),
+            reserve = listOf(handle(5), handle(4)),
+        )
+        val replacement = handles(1, 2, 3, 4, 5, 6)
+
+        val updated = codec.replacePartyMembers(buildGameData(originalCollection), replacement)
+        val updatedCollection = readCollectionHandles(updated)
+
+        assertEquals(replacement, updatedCollection.take(PartyCodec.PARTY_SIZE))
+        assertEquals(originalCollection.groupingBy { it }.eachCount(), updatedCollection.groupingBy { it }.eachCount())
     }
 
     @Test
     fun decodeReturnsEmptyWhenPartyBlockIsMissing() {
         assertTrue(codec.decode(ByteArray(32), emptyList()).isEmpty())
+    }
+
+    private fun assertIOExceptionContains(expected: String, block: () -> Unit) {
+        try {
+            block()
+            fail("IOException が発生しませんでした")
+        } catch (e: IOException) {
+            assertTrue("実際のメッセージ: ${e.message}", e.message.orEmpty().contains(expected))
+        }
     }
 
     private fun entry(slot: Int, handle: Long, name: String): YokaiEntry {
@@ -71,10 +161,28 @@ class PartyCodecTest {
         )
     }
 
-    private fun buildGameData(handles: List<Long>): ByteArray {
+    private fun handle(number: Int): Long {
+        return ((number.toLong() shl 16) or (number - 1).toLong()) and 0xFFFFFFFFL
+    }
+
+    private fun handles(vararg numbers: Int): List<Long> = numbers.map(::handle)
+
+    private fun collection(
+        active: List<Long>,
+        reserve: List<Long> = emptyList(),
+    ): List<Long> {
+        require(active.size == PartyCodec.PARTY_SIZE)
+        return MutableList(COLLECTION_SIZE) { 0L }.apply {
+            active.forEachIndexed { index, handle -> this[index] = handle }
+            reserve.forEachIndexed { index, handle -> this[PartyCodec.PARTY_SIZE + index] = handle }
+        }
+    }
+
+    private fun buildGameData(collectionHandles: List<Long>): ByteArray {
+        require(collectionHandles.size == COLLECTION_SIZE)
         val sub09 = block(0x09, ByteArray(0x18))
-        val collectionPayload = ByteArray(0x3C4) { 0x7F }
-        handles.forEachIndexed { index, handle ->
+        val collectionPayload = ByteArray(COLLECTION_SIZE * Int.SIZE_BYTES)
+        collectionHandles.forEachIndexed { index, handle ->
             writeUInt32Le(collectionPayload, index * Int.SIZE_BYTES, handle)
         }
         val partyPayload = sub09 + block(0x0A, collectionPayload)
@@ -83,9 +191,9 @@ class PartyCodecTest {
         return block(0xF1, outerPayload)
     }
 
-    private fun readPartyHandles(data: ByteArray): List<Long> {
+    private fun readCollectionHandles(data: ByteArray): List<Long> {
         val offset = partyPayloadOffset()
-        return (0 until 6).map { readUInt32Le(data, offset + it * Int.SIZE_BYTES) }
+        return (0 until COLLECTION_SIZE).map { readUInt32Le(data, offset + it * Int.SIZE_BYTES) }
     }
 
     private fun partyPayloadOffset(): Int {
@@ -122,5 +230,9 @@ class PartyCodecTest {
         data[offset + 1] = ((v ushr 8) and 0xFF).toByte()
         data[offset + 2] = ((v ushr 16) and 0xFF).toByte()
         data[offset + 3] = ((v ushr 24) and 0xFF).toByte()
+    }
+
+    private companion object {
+        const val COLLECTION_SIZE = 241
     }
 }
