@@ -26,38 +26,18 @@ jobs:
 
           path = Path("app/src/main/java/com/atuy/yws1editor/MainViewModel.kt")
           source = path.read_text()
-          old = '''            val currentMembers = normalizePartyMembers(state.partyMembers, state.entries)
-                      val previousHandle = currentMembers[position].yokaiHandle
-                      val swappedPosition = currentMembers.indexOfFirst {
-                          it.position != position && it.yokaiHandle == yokaiHandle
-                      }
-                      val updated = currentMembers.map { member ->
-                          when (member.position) {
-                              position -> partyMemberFromEntry(member.position, selectedEntry)
-                              swappedPosition -> {
+          old_member = "            val previousHandle = currentMembers[position].yokaiHandle\n"
+          new_member = "            val previousMember = currentMembers[position]\n"
+          old_swap = """                    swappedPosition -> {
                                   val previousEntry = state.entries.firstOrNull { it.handle == previousHandle }
                                   if (previousEntry == null) member else partyMemberFromEntry(member.position, previousEntry)
                               }
-                              else -> member
-                          }
-                      }
-          '''
-          new = '''            val currentMembers = normalizePartyMembers(state.partyMembers, state.entries)
-                      val previousMember = currentMembers[position]
-                      val swappedPosition = currentMembers.indexOfFirst {
-                          it.position != position && it.yokaiHandle == yokaiHandle
-                      }
-                      val updated = currentMembers.map { member ->
-                          when (member.position) {
-                              position -> partyMemberFromEntry(member.position, selectedEntry)
-                              swappedPosition -> previousMember.copy(position = member.position)
-                              else -> member
-                          }
-                      }
-          '''
-          if old not in source:
-              raise SystemExit("MainViewModel target block was not found")
-          path.write_text(source.replace(old, new, 1))
+          """
+          new_swap = "                    swappedPosition -> previousMember.copy(position = member.position)\n"
+          if source.count(old_member) != 1 or source.count(old_swap) != 1:
+              raise SystemExit("MainViewModel target block was not found exactly once")
+          source = source.replace(old_member, new_member, 1).replace(old_swap, new_swap, 1)
+          path.write_text(source)
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
