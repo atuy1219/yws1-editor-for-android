@@ -92,11 +92,12 @@ class PartyCodecTest {
         val originalCollection = collection(active = originalParty)
         val replacement = originalParty.toMutableList().apply { this[0] = droppedHandle }
 
-        val updated = codec.replacePartyMembers(
-            gameData = buildGameData(originalCollection),
-            handles = replacement,
-            validHandles = originalParty + droppedHandle,
+        val gameData = withValidYokaiRecord(
+            data = buildGameData(originalCollection),
+            slot = 44,
+            handle = droppedHandle,
         )
+        val updated = codec.replacePartyMembers(gameData, replacement)
         val updatedCollection = readCollectionHandles(updated)
 
         assertEquals(replacement, updatedCollection.take(PartyCodec.PARTY_SIZE))
@@ -126,7 +127,7 @@ class PartyCodecTest {
     }
 
     @Test
-    fun replacePartyMembersRejectsHandleOutsidePartyCollection() {
+    fun replacePartyMembersRejectsHandleOutsideYokaiSlots() {
         val originalParty = handles(1, 2, 3, 4, 5, 6)
         val replacement = originalParty.toMutableList().apply { this[0] = handle(99) }
 
@@ -214,6 +215,19 @@ class PartyCodecTest {
         return block(0xF1, outerPayload)
     }
 
+    private fun withValidYokaiRecord(
+        data: ByteArray,
+        slot: Int,
+        handle: Long,
+        yokaiId: Long = 1L,
+    ): ByteArray {
+        val base = YOKAI_START + slot * YOKAI_SIZE
+        val out = data.copyOf(maxOf(data.size, base + YOKAI_SIZE))
+        writeUInt32Le(out, base, handle)
+        writeUInt32Le(out, base + Int.SIZE_BYTES, yokaiId)
+        return out
+    }
+
     private fun readCollectionHandles(data: ByteArray): List<Long> {
         val offset = partyPayloadOffset()
         return (0 until COLLECTION_SIZE).map { readUInt32Le(data, offset + it * Int.SIZE_BYTES) }
@@ -257,5 +271,7 @@ class PartyCodecTest {
 
     private companion object {
         const val COLLECTION_SIZE = 241
+        const val YOKAI_START = 0x1D40
+        const val YOKAI_SIZE = 0x7C
     }
 }
