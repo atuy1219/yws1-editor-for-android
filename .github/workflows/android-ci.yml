@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [ "main" ]
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,41 +13,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.head_ref }}
-
-      - name: Apply MainViewModel party swap fix
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path("app/src/main/java/com/atuy/yws1editor/MainViewModel.kt")
-          lines = path.read_text().splitlines(keepends=True)
-          member_indexes = [i for i, line in enumerate(lines) if "val previousHandle = currentMembers[position].yokaiHandle" in line]
-          swap_indexes = [i for i, line in enumerate(lines) if "swappedPosition -> {" in line]
-          if len(member_indexes) != 1 or len(swap_indexes) != 1:
-              raise SystemExit("MainViewModel target block was not found exactly once")
-          member_index = member_indexes[0]
-          swap_index = swap_indexes[0]
-          if "val previousEntry =" not in lines[swap_index + 1] or "if (previousEntry == null)" not in lines[swap_index + 2]:
-              raise SystemExit("MainViewModel swap block has an unexpected shape")
-          lines[member_index] = lines[member_index].replace(
-              "val previousHandle = currentMembers[position].yokaiHandle",
-              "val previousMember = currentMembers[position]",
-          )
-          indent = lines[swap_index].split("swappedPosition", 1)[0]
-          lines[swap_index:swap_index + 4] = [
-              f"{indent}swappedPosition -> previousMember.copy(position = member.position)\n"
-          ]
-          path.write_text("".join(lines))
-          PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/com/atuy/yws1editor/MainViewModel.kt
-          if ! git diff --cached --quiet; then
-            git commit -m "Prevent duplicate party members in editor state"
-            git push origin HEAD:${GITHUB_HEAD_REF}
-          fi
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
