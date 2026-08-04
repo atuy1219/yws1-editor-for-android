@@ -32,7 +32,7 @@ class PartyCodecTest {
         val originalCollection = collection(active = originalHandles)
         val gameData = buildGameData(originalCollection)
 
-        val updated = codec.replacePartyMembers(gameData, replacementHandles)
+        val updated = codec.replacePartyMembers(gameData, replacementHandles, originalHandles)
         val updatedCollection = readCollectionHandles(updated)
 
         assertEquals(replacementHandles, updatedCollection.take(PartyCodec.PARTY_SIZE))
@@ -56,7 +56,7 @@ class PartyCodecTest {
             originalParty[5],
         )
 
-        val updated = codec.replacePartyMembers(buildGameData(originalCollection), replacement)
+        val updated = codec.replacePartyMembers(buildGameData(originalCollection), replacement, originalCollection.filter { it != 0L })
         val updatedCollection = readCollectionHandles(updated)
 
         assertEquals(replacement, updatedCollection.take(PartyCodec.PARTY_SIZE))
@@ -77,12 +77,35 @@ class PartyCodecTest {
             originalParty[5],
         )
 
-        val updated = codec.replacePartyMembers(buildGameData(originalCollection), replacement)
+        val updated = codec.replacePartyMembers(buildGameData(originalCollection), replacement, originalCollection.filter { it != 0L })
         val updatedCollection = readCollectionHandles(updated)
 
         assertEquals(replacement, updatedCollection.take(PartyCodec.PARTY_SIZE))
         assertEquals(originalParty[1], updatedCollection[PartyCodec.PARTY_SIZE])
         assertEquals(originalCollection.groupingBy { it }.eachCount(), updatedCollection.groupingBy { it }.eachCount())
+    }
+
+    @Test
+    fun replacePartyMembersRestoresValidHandleMissingFromCollection() {
+        val originalParty = handles(1, 2, 3, 4, 5, 6)
+        val droppedHandle = 0x002D002CL
+        val originalCollection = collection(active = originalParty)
+        val replacement = originalParty.toMutableList().apply { this[0] = droppedHandle }
+
+        val updated = codec.replacePartyMembers(
+            gameData = buildGameData(originalCollection),
+            handles = replacement,
+            validHandles = originalParty + droppedHandle,
+        )
+        val updatedCollection = readCollectionHandles(updated)
+
+        assertEquals(replacement, updatedCollection.take(PartyCodec.PARTY_SIZE))
+        assertEquals(originalParty[0], updatedCollection[PartyCodec.PARTY_SIZE])
+        assertEquals(1, updatedCollection.count { it == droppedHandle })
+        assertEquals(
+            originalCollection.filter { it != 0L }.toSet() + droppedHandle,
+            updatedCollection.filter { it != 0L }.toSet(),
+        )
     }
 
     @Test
@@ -98,7 +121,7 @@ class PartyCodecTest {
         )
 
         assertIOExceptionContains("複数のパーティ枠") {
-            codec.replacePartyMembers(buildGameData(collection(active = originalParty)), duplicateParty)
+            codec.replacePartyMembers(buildGameData(collection(active = originalParty)), duplicateParty, originalParty)
         }
     }
 
@@ -107,8 +130,8 @@ class PartyCodecTest {
         val originalParty = handles(1, 2, 3, 4, 5, 6)
         val replacement = originalParty.toMutableList().apply { this[0] = handle(99) }
 
-        assertIOExceptionContains("所属一覧に存在しません") {
-            codec.replacePartyMembers(buildGameData(collection(active = originalParty)), replacement)
+        assertIOExceptionContains("妖怪スロットに存在しません") {
+            codec.replacePartyMembers(buildGameData(collection(active = originalParty)), replacement, originalParty)
         }
     }
 
@@ -120,7 +143,7 @@ class PartyCodecTest {
         )
         val replacement = handles(1, 2, 3, 4, 5, 6)
 
-        val updated = codec.replacePartyMembers(buildGameData(originalCollection), replacement)
+        val updated = codec.replacePartyMembers(buildGameData(originalCollection), replacement, originalCollection.filter { it != 0L })
         val updatedCollection = readCollectionHandles(updated)
 
         assertEquals(replacement, updatedCollection.take(PartyCodec.PARTY_SIZE))
