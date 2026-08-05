@@ -1,0 +1,42 @@
+name: Apply daily systems integration
+
+on:
+  push:
+    branches:
+      - agent/unify-daily-systems
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/unify-daily-systems
+          fetch-depth: 0
+
+      - name: Apply integration patch
+        id: patch
+        shell: bash
+        run: |
+          if grep -q 'Daily("一日一回系")' app/src/main/java/com/atuy/yws1editor/MainViewModel.kt; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python .github/scripts/unify_daily_systems_patch.py
+          rm -f app/src/main/java/com/atuy/yws1editor/DailyBattleActivity.kt
+          rm -f app/src/main/java/com/atuy/yws1editor/DailyBattleScreen.kt
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit integrated sources
+        if: steps.patch.outputs.changed == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main .github/scripts/unify_daily_systems_patch.py
+          git commit -m "Integrate daily systems into normal editor"
+          git push origin HEAD:agent/unify-daily-systems
