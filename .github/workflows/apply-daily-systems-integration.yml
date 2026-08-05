@@ -34,7 +34,7 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          python .github/scripts/unify_daily_systems_patch.py
+          python .github/scripts/run_unify_daily_systems_patch.py
           rm -f app/src/main/java/com/atuy/yws1editor/DailyBattleActivity.kt
           rm -f app/src/main/java/com/atuy/yws1editor/DailyBattleScreen.kt
           echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -45,6 +45,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main .github/scripts/unify_daily_systems_patch.py
+          git add app/src/main .github/scripts/unify_daily_systems_patch.py .github/scripts/run_unify_daily_systems_patch.py
           git commit -m "Integrate daily systems into normal editor"
           git push origin HEAD:agent/unify-daily-systems
