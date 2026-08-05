@@ -29,6 +29,7 @@ import com.atuy.yws1editor.yokai.StatGroup
 import com.atuy.yws1editor.yokai.YokaiEntry
 import com.atuy.yws1editor.yokai.YokaiMasterData
 import com.atuy.yws1editor.yokai.YokaiParser
+import com.atuy.yws1editor.yokai.YokaiStatRules
 import com.atuy.yws1editor.yokai.ShizukuFileGateway
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -140,23 +141,7 @@ class MainViewModel : ViewModel() {
         private const val SIGNED_STAT_MIN = -128
         private const val SIGNED_STAT_MAX = 127
         private const val NORMAL_LEVEL_MAX = 99
-        private const val NORMAL_IVA_TOTAL_MAX = 8
-        private const val NORMAL_IVB1_TOTAL_MAX = 10
         private const val NORMAL_CB_TOTAL_MAX = 20
-        private const val NORMAL_IVB_MAX = 15
-
-        // H, A, M, D, S
-        private val IVA_EDITABLE_BY_CLASS: Map<Int, List<Boolean>> = mapOf(
-            0 to listOf(false, false, false, false, false),
-            1 to listOf(false, true, false, false, false),
-            2 to listOf(false, false, true, false, false),
-            3 to listOf(false, false, false, true, false),
-            4 to listOf(false, false, false, false, true),
-            5 to listOf(false, false, true, true, false),
-            6 to listOf(true, false, false, false, true),
-            7 to listOf(false, true, true, false, false),
-            8 to listOf(true, false, false, false, false),
-        )
     }
 
     val editableSections = listOf("game0.yw", "game1.yw", "game2.yw", "game3.yw")
@@ -1032,20 +1017,24 @@ class MainViewModel : ViewModel() {
                         stat = masked,
                         index = index,
                         requested = value,
-                        cellMax = SIGNED_STAT_MAX,
-                        totalMax = NORMAL_IVA_TOTAL_MAX,
+                        cellMax = YokaiStatRules.ivaCellMax(entry.yokaiClass),
+                        totalMax = YokaiStatRules.IVA_TOTAL_MAX,
                     )
                     entry.copy(iva = applyIvaMask(updated, editableMask))
                 }
 
                 StatGroup.IVB1 -> {
-                    val updated = applyStatUpdate(
-                        stat = entry.ivb1,
-                        index = index,
-                        requested = value,
-                        cellMax = NORMAL_IVB_MAX,
-                        totalMax = if (isCheatMode) null else NORMAL_IVB1_TOTAL_MAX,
-                    )
+                    val updated = if (isCheatMode) {
+                        applyStatUpdate(
+                            stat = entry.ivb1,
+                            index = index,
+                            requested = value,
+                            cellMax = YokaiStatRules.PACKED_IVB_CELL_MAX,
+                            totalMax = null,
+                        )
+                    } else {
+                        YokaiStatRules.updateIvb1(entry.ivb1, index, value)
+                    }
                     entry.copy(ivb1 = updated)
                 }
 
@@ -1054,7 +1043,7 @@ class MainViewModel : ViewModel() {
                         stat = entry.ivb2,
                         index = index,
                         requested = value,
-                        cellMax = NORMAL_IVB_MAX,
+                        cellMax = YokaiStatRules.PACKED_IVB_CELL_MAX,
                         totalMax = null,
                     )
                     entry.copy(ivb2 = updated)
@@ -1196,14 +1185,13 @@ class MainViewModel : ViewModel() {
     }
 
     private fun normalizeForNormalMode(entry: YokaiEntry): YokaiEntry {
-        val ivaMask = ivaEditableMask(entry.yokaiClass)
-        val normalizedIva = normalizeStatForNormal(
-            applyIvaMask(entry.iva, ivaMask),
-            SIGNED_STAT_MAX,
-            NORMAL_IVA_TOTAL_MAX,
+        val normalizedIva = YokaiStatRules.normalizeIva(entry.iva, entry.yokaiClass)
+        val normalizedIvb1 = YokaiStatRules.normalizeIvb1(entry.ivb1)
+        val normalizedIvb2 = normalizeStatForNormal(
+            entry.ivb2,
+            YokaiStatRules.PACKED_IVB_CELL_MAX,
+            totalMax = null,
         )
-        val normalizedIvb1 = normalizeStatForNormal(entry.ivb1, NORMAL_IVB_MAX, NORMAL_IVB1_TOTAL_MAX)
-        val normalizedIvb2 = normalizeStatForNormal(entry.ivb2, NORMAL_IVB_MAX, totalMax = null)
         val normalizedCb = normalizeStatForNormal(entry.cb, SIGNED_STAT_MAX, NORMAL_CB_TOTAL_MAX)
 
         return entry.copy(
@@ -1241,7 +1229,7 @@ class MainViewModel : ViewModel() {
     }
 
     private fun ivaEditableMask(yokaiClass: Int?): List<Boolean> {
-        return IVA_EDITABLE_BY_CLASS[yokaiClass] ?: listOf(true, true, true, true, true)
+        return YokaiStatRules.ivaEditableMask(yokaiClass)
     }
 
     private fun applyIvaMask(stat: Stat5, editableMask: List<Boolean>): Stat5 {
