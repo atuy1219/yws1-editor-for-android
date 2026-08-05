@@ -98,6 +98,7 @@ import com.atuy.yws1editor.yokai.YokaiEncyclopediaEntry
 import com.atuy.yws1editor.yokai.YokaiEntry
 import com.atuy.yws1editor.yokai.YokaiMasterLoader
 import com.atuy.yws1editor.yokai.YokaiStatusCalculator
+import com.atuy.yws1editor.yokai.YokaiStatRules
 import com.atuy.yws1editor.yokai.yokaiClassLabel
 import rikka.shizuku.Shizuku
 import java.text.SimpleDateFormat
@@ -2056,18 +2057,6 @@ private fun YokaiTabContent(
 private val ZERO_STAT = listOf(0, 0, 0, 0, 0)
 private val STATUS_LABEL_WIDTH = 44.dp
 private val STATUS_CELL_WIDTH = 64.dp
-private val IVA_EDITABLE_BY_CLASS: Map<Int, List<Boolean>> = mapOf(
-    0 to listOf(false, false, false, false, false),
-    1 to listOf(false, true, false, false, false),
-    2 to listOf(false, false, true, false, false),
-    3 to listOf(false, false, false, true, false),
-    4 to listOf(false, false, false, false, true),
-    5 to listOf(false, false, true, true, false),
-    6 to listOf(true, false, false, false, true),
-    7 to listOf(false, true, true, false, false),
-    8 to listOf(true, false, false, false, false),
-)
-
 @Composable
 private fun YokaiStatusEditorPanel(
     entry: YokaiEntry,
@@ -2094,7 +2083,12 @@ private fun YokaiStatusEditorPanel(
     val ivaEditableMask = if (isCheatMode) {
         null
     } else {
-        IVA_EDITABLE_BY_CLASS[entry.yokaiClass] ?: listOf(true, true, true, true, true)
+        YokaiStatRules.ivaEditableMask(entry.yokaiClass)
+    }
+    val ivaCellMax = if (isCheatMode) {
+        ivaInputMax
+    } else {
+        YokaiStatRules.ivaCellMax(entry.yokaiClass)
     }
 
     Column(
@@ -2125,13 +2119,23 @@ private fun YokaiStatusEditorPanel(
         StatusEditableRow(
             label = "IVA",
             stat = entry.iva,
-            max = ivaInputMax,
+            max = ivaCellMax,
             min = ivaInputMin,
             editableMask = ivaEditableMask,
             onValueChange = { i, v -> onStatChange(StatGroup.IVA, i, v) },
         )
-        StatusEditableRow(label = "IVB1", stat = entry.ivb1, max = 15, onValueChange = { i, v -> onStatChange(StatGroup.IVB1, i, v) })
-        StatusEditableRow(label = "IVB2", stat = entry.ivb2, max = 15, onValueChange = { i, v -> onStatChange(StatGroup.IVB2, i, v) })
+        StatusEditableRow(
+            label = "IVB1",
+            stat = entry.ivb1,
+            max = if (isCheatMode) YokaiStatRules.PACKED_IVB_CELL_MAX else YokaiStatRules.IVB1_CELL_MAX,
+            onValueChange = { i, v -> onStatChange(StatGroup.IVB1, i, v) },
+        )
+        StatusEditableRow(
+            label = "IVB2",
+            stat = entry.ivb2,
+            max = YokaiStatRules.PACKED_IVB_CELL_MAX,
+            onValueChange = { i, v -> onStatChange(StatGroup.IVB2, i, v) },
+        )
         StatusEditableRow(label = "CB", stat = entry.cb, max = cbInputMax, min = cbInputMin, onValueChange = { i, v -> onStatChange(StatGroup.CB, i, v) })
         StatusReadOnlyRow(label = "最終", values = finalStatus?.values() ?: ZERO_STAT)
         TechniqueRow(
