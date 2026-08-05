@@ -86,6 +86,7 @@ import com.atuy.yws1editor.yokai.GashaStateEntry
 import com.atuy.yws1editor.yokai.GashaStateCodec
 import com.atuy.yws1editor.yokai.GashaPredictor
 import com.atuy.yws1editor.yokai.GashaPrizeEntry
+import com.atuy.yws1editor.yokai.DailySimpleFlag
 import com.atuy.yws1editor.yokai.SasuraiEncounterOption
 import com.atuy.yws1editor.yokai.SasuraiResident
 import com.atuy.yws1editor.yokai.SaveDomainMasterLoader
@@ -347,6 +348,12 @@ private fun AppScreen(
             onPartyMemberChange = mainViewModel::updatePartyMember,
             onPartyMemberRemove = mainViewModel::removePartyMember,
             onSasuraiEncounterChange = mainViewModel::updateSasuraiEncounter,
+            onDailyBattleChange = mainViewModel::updateDailyBattle,
+            onSetAllDailyBattles = mainViewModel::setAllDailyBattles,
+            onResetDailyGasha = mainViewModel::resetDailyGasha,
+            onResetDailySasurai = mainViewModel::resetDailySasurai,
+            onDailySimpleFlagChange = mainViewModel::updateDailySimpleFlag,
+            onResetAllDailySystems = mainViewModel::resetAllDailySystems,
             onEncyclopediaMetChange = mainViewModel::updateEncyclopediaMet,
             onEncyclopediaOwnedChange = mainViewModel::updateEncyclopediaOwned,
             onEncyclopediaNewChange = mainViewModel::updateEncyclopediaNew,
@@ -589,6 +596,12 @@ private fun EditorScreen(
     onPartyMemberChange: (Int, Long) -> Unit,
     onPartyMemberRemove: (Int) -> Unit,
     onSasuraiEncounterChange: (Int, Long) -> Unit,
+    onDailyBattleChange: (Int, Boolean) -> Unit,
+    onSetAllDailyBattles: (Boolean) -> Unit,
+    onResetDailyGasha: () -> Unit,
+    onResetDailySasurai: () -> Unit,
+    onDailySimpleFlagChange: (DailySimpleFlag, Boolean) -> Unit,
+    onResetAllDailySystems: () -> Unit,
     onEncyclopediaMetChange: (Long, Boolean) -> Unit,
     onEncyclopediaOwnedChange: (Long, Boolean) -> Unit,
     onEncyclopediaNewChange: (Long, Boolean) -> Unit,
@@ -770,6 +783,18 @@ private fun EditorScreen(
                     yokaiNames = yokaiOptions.associate { it.id to it.name },
                     enabled = !fileOperationBusy,
                     onEncounterChange = onSasuraiEncounterChange,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                EditorTopTab.Daily -> DailySystemsTabContent(
+                    state = state.dailySystems,
+                    enabled = !fileOperationBusy,
+                    onBattleChange = onDailyBattleChange,
+                    onSetAllBattles = onSetAllDailyBattles,
+                    onResetGasha = onResetDailyGasha,
+                    onResetSasurai = onResetDailySasurai,
+                    onSimpleFlagChange = onDailySimpleFlagChange,
+                    onResetAll = onResetAllDailySystems,
                     modifier = Modifier.fillMaxSize(),
                 )
 

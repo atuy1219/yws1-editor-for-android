@@ -15,6 +15,9 @@ import com.atuy.yws1editor.yokai.GashaStateCodec
 import com.atuy.yws1editor.yokai.GashaStateEntry
 import com.atuy.yws1editor.yokai.GashaPredictor
 import com.atuy.yws1editor.yokai.GashaPrizeEntry
+import com.atuy.yws1editor.yokai.DailySimpleFlag
+import com.atuy.yws1editor.yokai.DailySystemCodec
+import com.atuy.yws1editor.yokai.DailySystemState
 import com.atuy.yws1editor.yokai.SasuraiCodec
 import com.atuy.yws1editor.yokai.SasuraiEncounterOption
 import com.atuy.yws1editor.yokai.SasuraiResident
@@ -54,6 +57,7 @@ enum class EditorTopTab(val label: String) {
     KeyItem("だいじなもの"),
     Gasha("ガシャ"),
     Sasurai("さすらい荘"),
+    Daily("一日一回系"),
     Info("情報"),
     Encyclopedia("妖怪大辞典"),
 }
@@ -125,6 +129,7 @@ data class EditorUiState(
     val gashaPrizeEntries: List<GashaPrizeEntry> = emptyList(),
     val sasuraiResidents: List<SasuraiResident> = emptyList(),
     val sasuraiEncounterOptions: List<SasuraiEncounterOption> = emptyList(),
+    val dailySystems: DailySystemState = DailySystemState.EMPTY,
     val encyclopediaEntries: List<YokaiEncyclopediaEntry> = emptyList(),
     val itemNames: Map<Long, String> = emptyMap(),
     val equipmentNames: Map<Long, String> = emptyMap(),
@@ -153,6 +158,7 @@ class MainViewModel : ViewModel() {
     private val gashaCodec = GashaStateCodec()
     private var gashaPredictor = GashaPredictor(emptyList())
     private val sasuraiCodec = SasuraiCodec()
+    private val dailySystemCodec = DailySystemCodec()
     private val encyclopediaCodec = YokaiEncyclopediaCodec()
     private var masterData = YokaiMasterData.EMPTY
     private var saveDomainMasterData = SaveDomainMasterData.EMPTY
@@ -257,6 +263,7 @@ class MainViewModel : ViewModel() {
                             keyItems = emptyList(),
                             gashaStates = emptyList(),
                             sasuraiResidents = emptyList(),
+                            dailySystems = DailySystemState.EMPTY,
                             encyclopediaEntries = emptyList(),
                             safeItemQuantityCeilings = emptyMap(),
                             expandedYokaiSlot = null,
@@ -443,8 +450,12 @@ class MainViewModel : ViewModel() {
                                 )
                             }
                         }
-                        val withEncyclopedia = encyclopediaCodec.applyEntries(
+                        val withDailySystems = dailySystemCodec.apply(
                             gameData = withSasurai,
+                            state = snapshot.dailySystems,
+                        )
+                        val withEncyclopedia = encyclopediaCodec.applyEntries(
+                            gameData = withDailySystems,
                             entries = snapshot.encyclopediaEntries,
                         )
                         val writeResult = SaveInfoCodec.apply(
@@ -498,6 +509,7 @@ class MainViewModel : ViewModel() {
                     keyItems = emptyList(),
                     gashaStates = emptyList(),
                     sasuraiResidents = emptyList(),
+                    dailySystems = DailySystemState.EMPTY,
                     encyclopediaEntries = emptyList(),
                     safeItemQuantityCeilings = emptyMap(),
                     expandedYokaiSlot = null,
@@ -526,6 +538,7 @@ class MainViewModel : ViewModel() {
                 gashaStates = domains.gashaStates,
                 gashaPrizeEntries = saveDomainMasterData.gashaPrizeEntries,
                 sasuraiResidents = domains.sasuraiResidents,
+                dailySystems = domains.dailySystems,
                 encyclopediaEntries = domains.encyclopediaEntries,
                 safeItemQuantityCeilings = safeQuantityCeilings(domains.inventoryItems),
                 attitudes = masterData.attitudes,
@@ -806,6 +819,51 @@ class MainViewModel : ViewModel() {
                 sasuraiResidents = updated,
                 hasUnsavedChanges = state.hasUnsavedChanges ||
                     updated.map { it.encounterId } != state.sasuraiResidents.map { it.encounterId },
+            )
+        }
+    }
+
+    fun updateDailyBattle(flagIndex: Int, foughtToday: Boolean) {
+        updateDailySystems { state -> dailySystemCodec.setBattle(state, flagIndex, foughtToday) }
+    }
+
+    fun setAllDailyBattles(foughtToday: Boolean) {
+        updateDailySystems { state -> dailySystemCodec.setAllBattles(state, foughtToday) }
+    }
+
+    fun resetDailyGasha() {
+        updateDailySystems(
+            message = "妖怪ガシャの日次使用回数と報酬フラグをリセットしました",
+        ) { state -> dailySystemCodec.resetGasha(state) }
+    }
+
+    fun resetDailySasurai() {
+        updateDailySystems(
+            message = "さすらい荘の日次抽選と報酬数をリセットしました",
+        ) { state -> dailySystemCodec.resetSasurai(state) }
+    }
+
+    fun updateDailySimpleFlag(definition: DailySimpleFlag, usedToday: Boolean) {
+        updateDailySystems { state -> dailySystemCodec.setSimpleFlag(state, definition, usedToday) }
+    }
+
+    fun resetAllDailySystems() {
+        updateDailySystems(message = "すべての日次制限を解除しました") { state ->
+            dailySystemCodec.resetAll(state)
+        }
+    }
+
+    private fun updateDailySystems(
+        message: String? = null,
+        updater: (DailySystemState) -> DailySystemState,
+    ) {
+        if (isFileOperationBusy()) return
+        _uiState.update { state ->
+            val updated = updater(state.dailySystems)
+            state.copy(
+                dailySystems = updated,
+                hasUnsavedChanges = state.hasUnsavedChanges || updated != state.dailySystems,
+                message = message ?: state.message,
             )
         }
     }
@@ -1278,6 +1336,7 @@ class MainViewModel : ViewModel() {
                 gashaStates = loadedData.domains.gashaStates,
                 gashaPrizeEntries = saveDomainMasterData.gashaPrizeEntries,
                 sasuraiResidents = loadedData.domains.sasuraiResidents,
+                dailySystems = loadedData.domains.dailySystems,
                 encyclopediaEntries = loadedData.domains.encyclopediaEntries,
                 sasuraiEncounterOptions = saveDomainMasterData.sasuraiEncounterOptions,
                 itemNames = saveDomainMasterData.itemNames,
@@ -1360,6 +1419,7 @@ class MainViewModel : ViewModel() {
             keyItems = inventory.keyItems,
             gashaStates = gashaCodec.decode(gameData),
             sasuraiResidents = sasuraiCodec.decode(gameData),
+            dailySystems = dailySystemCodec.decode(gameData),
             encyclopediaEntries = encyclopediaCodec.decode(gameData, masterData),
         )
     }
@@ -1483,6 +1543,7 @@ private data class SaveDomains(
     val keyItems: List<KeyItemEntry>,
     val gashaStates: List<GashaStateEntry>,
     val sasuraiResidents: List<SasuraiResident>,
+    val dailySystems: DailySystemState,
     val encyclopediaEntries: List<YokaiEncyclopediaEntry>,
 )
 
