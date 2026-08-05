@@ -136,7 +136,9 @@ data class EditorUiState(
 class MainViewModel : ViewModel() {
 
     companion object {
-        private const val CHEAT_STAT_MAX = 255
+        private const val CHEAT_LEVEL_MAX = 255
+        private const val SIGNED_STAT_MIN = -128
+        private const val SIGNED_STAT_MAX = 127
         private const val NORMAL_LEVEL_MAX = 99
         private const val NORMAL_IVA_TOTAL_MAX = 8
         private const val NORMAL_IVB1_TOTAL_MAX = 10
@@ -950,7 +952,7 @@ class MainViewModel : ViewModel() {
     }
 
     fun updateLevel(slot: Int, level: Int) {
-        val max = if (_uiState.value.isCheatMode) CHEAT_STAT_MAX else NORMAL_LEVEL_MAX
+        val max = if (_uiState.value.isCheatMode) CHEAT_LEVEL_MAX else NORMAL_LEVEL_MAX
         updateEntry(slot) { it.copy(level = clampToRange(level, max)) }
     }
 
@@ -1014,7 +1016,8 @@ class MainViewModel : ViewModel() {
                             stat = entry.iva,
                             index = index,
                             requested = value,
-                            cellMax = CHEAT_STAT_MAX,
+                            cellMin = SIGNED_STAT_MIN,
+                            cellMax = SIGNED_STAT_MAX,
                             totalMax = null,
                         )
                         return@updateEntry entry.copy(iva = updated)
@@ -1029,7 +1032,7 @@ class MainViewModel : ViewModel() {
                         stat = masked,
                         index = index,
                         requested = value,
-                        cellMax = CHEAT_STAT_MAX,
+                        cellMax = SIGNED_STAT_MAX,
                         totalMax = NORMAL_IVA_TOTAL_MAX,
                     )
                     entry.copy(iva = applyIvaMask(updated, editableMask))
@@ -1062,7 +1065,8 @@ class MainViewModel : ViewModel() {
                         stat = entry.cb,
                         index = index,
                         requested = value,
-                        cellMax = CHEAT_STAT_MAX,
+                        cellMin = if (isCheatMode) SIGNED_STAT_MIN else 0,
+                        cellMax = SIGNED_STAT_MAX,
                         totalMax = if (isCheatMode) null else NORMAL_CB_TOTAL_MAX,
                     )
                     entry.copy(cb = updated)
@@ -1175,11 +1179,12 @@ class MainViewModel : ViewModel() {
         stat: Stat5,
         index: Int,
         requested: Int,
+        cellMin: Int = 0,
         cellMax: Int,
         totalMax: Int?,
     ): Stat5 {
         if (index !in 0..4) return stat
-        val clampedRequested = clampToRange(requested, cellMax)
+        val clampedRequested = requested.coerceIn(cellMin, cellMax)
         if (totalMax == null) return stat.update(index, clampedRequested)
 
         val currentValues = stat.values()
@@ -1194,12 +1199,12 @@ class MainViewModel : ViewModel() {
         val ivaMask = ivaEditableMask(entry.yokaiClass)
         val normalizedIva = normalizeStatForNormal(
             applyIvaMask(entry.iva, ivaMask),
-            CHEAT_STAT_MAX,
+            SIGNED_STAT_MAX,
             NORMAL_IVA_TOTAL_MAX,
         )
         val normalizedIvb1 = normalizeStatForNormal(entry.ivb1, NORMAL_IVB_MAX, NORMAL_IVB1_TOTAL_MAX)
         val normalizedIvb2 = normalizeStatForNormal(entry.ivb2, NORMAL_IVB_MAX, totalMax = null)
-        val normalizedCb = normalizeStatForNormal(entry.cb, CHEAT_STAT_MAX, NORMAL_CB_TOTAL_MAX)
+        val normalizedCb = normalizeStatForNormal(entry.cb, SIGNED_STAT_MAX, NORMAL_CB_TOTAL_MAX)
 
         return entry.copy(
             level = clampToRange(entry.level, NORMAL_LEVEL_MAX),
