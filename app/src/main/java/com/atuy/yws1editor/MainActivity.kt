@@ -686,8 +686,10 @@ private fun EditorScreen(
                     isCheatMode = isCheatMode,
                     onCheatModeChange = onCheatModeChange,
                     levelInputMax = if (isCheatMode) 255 else 99,
-                    ivaInputMax = if (isCheatMode) 255 else 8,
-                    cbInputMax = if (isCheatMode) 255 else 20,
+                    ivaInputMin = if (isCheatMode) -128 else 0,
+                    ivaInputMax = if (isCheatMode) 127 else 8,
+                    cbInputMin = if (isCheatMode) -128 else 0,
+                    cbInputMax = if (isCheatMode) 127 else 20,
                     onCardClick = onYokaiCardClick,
                     onYokaiChange = onYokaiChange,
                     onLevelChange = onLevelChange,
@@ -1936,7 +1938,9 @@ private fun YokaiTabContent(
     isCheatMode: Boolean,
     onCheatModeChange: (Boolean) -> Unit,
     levelInputMax: Int,
+    ivaInputMin: Int,
     ivaInputMax: Int,
+    cbInputMin: Int,
     cbInputMax: Int,
     onCardClick: (Int) -> Unit,
     onYokaiChange: (Int, Long) -> Unit,
@@ -1972,7 +1976,7 @@ private fun YokaiTabContent(
                 checked = isCheatMode,
                 onCheckedChange = onCheatModeChange,
             )
-            Text("チートモード (LV/IVA/CBは最大255、IVB1/IVB2は15固定)")
+            Text("チートモード (LVは最大255、IVA/CBは-128〜127、IVB1/IVB2は0〜15)")
         }
 
         OutlinedTextField(
@@ -2025,7 +2029,9 @@ private fun YokaiTabContent(
                                 attitudes = attitudes,
                                 isCheatMode = isCheatMode,
                                 levelInputMax = levelInputMax,
+                                ivaInputMin = ivaInputMin,
                                 ivaInputMax = ivaInputMax,
+                                cbInputMin = cbInputMin,
                                 cbInputMax = cbInputMax,
                                 onYokaiChange = { onYokaiChange(entry.slot, it) },
                                 onLevelChange = { onLevelChange(entry.slot, it) },
@@ -2069,7 +2075,9 @@ private fun YokaiStatusEditorPanel(
     attitudes: List<YokaiAttitude>,
     isCheatMode: Boolean,
     levelInputMax: Int,
+    ivaInputMin: Int,
     ivaInputMax: Int,
+    cbInputMin: Int,
     cbInputMax: Int,
     onYokaiChange: (Long) -> Unit,
     onLevelChange: (Int) -> Unit,
@@ -2118,12 +2126,13 @@ private fun YokaiStatusEditorPanel(
             label = "IVA",
             stat = entry.iva,
             max = ivaInputMax,
+            min = ivaInputMin,
             editableMask = ivaEditableMask,
             onValueChange = { i, v -> onStatChange(StatGroup.IVA, i, v) },
         )
         StatusEditableRow(label = "IVB1", stat = entry.ivb1, max = 15, onValueChange = { i, v -> onStatChange(StatGroup.IVB1, i, v) })
         StatusEditableRow(label = "IVB2", stat = entry.ivb2, max = 15, onValueChange = { i, v -> onStatChange(StatGroup.IVB2, i, v) })
-        StatusEditableRow(label = "CB", stat = entry.cb, max = cbInputMax, onValueChange = { i, v -> onStatChange(StatGroup.CB, i, v) })
+        StatusEditableRow(label = "CB", stat = entry.cb, max = cbInputMax, min = cbInputMin, onValueChange = { i, v -> onStatChange(StatGroup.CB, i, v) })
         StatusReadOnlyRow(label = "最終", values = finalStatus?.values() ?: ZERO_STAT)
         TechniqueRow(
             attackLevel = entry.attackLevel,
@@ -2466,6 +2475,7 @@ private fun StatusEditableRow(
     label: String,
     stat: Stat5,
     max: Int,
+    min: Int = 0,
     editableMask: List<Boolean>? = null,
     onValueChange: (Int, Int) -> Unit,
 ) {
@@ -2478,6 +2488,7 @@ private fun StatusEditableRow(
                 CompactNumberField(
                     value = value,
                     max = max,
+                    min = min,
                     modifier = Modifier
                         .width(STATUS_CELL_WIDTH)
                         .padding(horizontal = 1.dp),
@@ -2580,6 +2591,7 @@ private fun StateFlagRow(
 private fun CompactNumberField(
     value: Int,
     max: Int,
+    min: Int = 0,
     modifier: Modifier = Modifier,
     onValueChange: (Int) -> Unit,
 ) {
@@ -2592,11 +2604,7 @@ private fun CompactNumberField(
             if (input.isBlank()) return@OutlinedTextField
 
             val parsed = input.toIntOrNull() ?: return@OutlinedTextField
-            val clamped = when {
-                parsed < 0 -> 0
-                parsed > max -> max
-                else -> parsed
-            }
+            val clamped = parsed.coerceIn(min, max)
             onValueChange(clamped)
             if (clamped.toString() != input) {
                 text = clamped.toString()
@@ -2605,17 +2613,14 @@ private fun CompactNumberField(
         modifier = modifier.onFocusChanged { state ->
             if (!state.isFocused) {
                 val parsed = text.toIntOrNull()
-                val fixed = when {
-                    parsed == null -> 0
-                    parsed < 0 -> 0
-                    parsed > max -> max
-                    else -> parsed
-                }
+                val fixed = parsed?.coerceIn(min, max) ?: 0.coerceIn(min, max)
                 onValueChange(fixed)
                 text = fixed.toString()
             }
         },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (min < 0) KeyboardType.Text else KeyboardType.Number,
+        ),
         singleLine = true,
     )
 }

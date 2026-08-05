@@ -33,14 +33,17 @@ class YokaiParser(
             val majimeCorrection = game0Data[base + 0x76].toInt() and 0xFF
             val stateFlags = game0Data[base + 0x77].toInt() and 0xFF
 
+            // CalcParamBase reads IVA with LDRSB, so Byte.toInt() must sign-extend it.
             val iva = Stat5(
-                hp = game0Data[base + 0x60].toInt() and 0xFF,
-                power = game0Data[base + 0x61].toInt() and 0xFF,
-                spirit = game0Data[base + 0x62].toInt() and 0xFF,
-                defense = game0Data[base + 0x63].toInt() and 0xFF,
-                speed = game0Data[base + 0x64].toInt() and 0xFF,
+                hp = game0Data[base + 0x60].toInt(),
+                power = game0Data[base + 0x61].toInt(),
+                spirit = game0Data[base + 0x62].toInt(),
+                defense = game0Data[base + 0x63].toInt(),
+                speed = game0Data[base + 0x64].toInt(),
             )
 
+            // GetPrmRandom/GetPrmEvolve and CalcParamBase split these bytes into
+            // unsigned low/high nibbles. Both IVB groups therefore remain in 0..15.
             val ivb = intArrayOf(
                 game0Data[base + 0x65].toInt() and 0xFF,
                 game0Data[base + 0x66].toInt() and 0xFF,
@@ -64,12 +67,13 @@ class YokaiParser(
                 speed = (ivb[4] ushr 4) and 0x0F,
             )
 
+            // CalcParamBase reads CB with LDRSB as well.
             val cb = Stat5(
-                hp = game0Data[base + 0x6A].toInt() and 0xFF,
-                power = game0Data[base + 0x6B].toInt() and 0xFF,
-                spirit = game0Data[base + 0x6C].toInt() and 0xFF,
-                defense = game0Data[base + 0x6D].toInt() and 0xFF,
-                speed = game0Data[base + 0x6E].toInt() and 0xFF,
+                hp = game0Data[base + 0x6A].toInt(),
+                power = game0Data[base + 0x6B].toInt(),
+                spirit = game0Data[base + 0x6C].toInt(),
+                defense = game0Data[base + 0x6D].toInt(),
+                speed = game0Data[base + 0x6E].toInt(),
             )
 
             val masterName = masterData.nameById[yokaiId]
@@ -122,18 +126,22 @@ class YokaiParser(
             out[base + 0x76] = clamp(entry.majimeCorrection, 0, 255).toByte()
             out[base + 0x77] = clamp(entry.stateFlags, 0, 255).toByte()
 
-            writeStat5(out, base + 0x60, entry.iva, max = 255)
+            writeSignedByteStat5(out, base + 0x60, entry.iva)
             writePackedNibbleStat5(out, base + 0x65, entry.ivb1, entry.ivb2)
-            writeStat5(out, base + 0x6A, entry.cb, max = 255)
+            writeSignedByteStat5(out, base + 0x6A, entry.cb)
         }
 
         return out
     }
 
-    private fun writeStat5(data: ByteArray, offset: Int, stat: Stat5, max: Int) {
+    private fun writeSignedByteStat5(data: ByteArray, offset: Int, stat: Stat5) {
         val values = stat.values()
         for (i in values.indices) {
-            data[offset + i] = clamp(values[i], 0, max).toByte()
+            data[offset + i] = clamp(
+                values[i],
+                Byte.MIN_VALUE.toInt(),
+                Byte.MAX_VALUE.toInt(),
+            ).toByte()
         }
     }
 
