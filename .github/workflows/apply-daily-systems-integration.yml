@@ -4,12 +4,20 @@ on:
   push:
     branches:
       - agent/unify-daily-systems
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.ref_name == 'agent/unify-daily-systems' || github.head_ref == 'agent/unify-daily-systems'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout branch
