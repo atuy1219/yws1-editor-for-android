@@ -30,6 +30,15 @@ data class YokaiMasterData(
     }
 }
 
+internal object YokaiMasterIdCorrection {
+    private const val LEGACY_KOME_JII_ID = 0x9942143CL
+    const val KOME_JII_ID = 0x442FF647L
+
+    fun normalize(id: Long, name: String): Long {
+        return if (id == LEGACY_KOME_JII_ID && name == "こめ爺") KOME_JII_ID else id
+    }
+}
+
 object YokaiMasterLoader {
 
     private val xmlItemRegex = Regex("""<item\s+id="(\d+)"\s+name="([^"]+)"""")
@@ -68,8 +77,17 @@ object YokaiMasterLoader {
                 ordered.add(id to name)
             }
 
-            val nameById = ordered.toMap()
-            val numberById = ordered.mapIndexed { index, pair ->
+            val normalizedOrdered = ordered.map { (id, name) ->
+                YokaiMasterIdCorrection.normalize(id, name) to name
+            }
+            val standardNameById = normalizedOrdered.toMap()
+            val nameById = buildMap {
+                putAll(standardNameById)
+                WantedYokaiCatalog.entries.forEach { wanted ->
+                    putIfAbsent(wanted.id, wanted.name)
+                }
+            }
+            val numberById = normalizedOrdered.mapIndexed { index, pair ->
                 pair.first to (index + 1)
             }.toMap()
 
