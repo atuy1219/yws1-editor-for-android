@@ -125,9 +125,15 @@ object YokaiMasterLoader {
                 )
             }
 
-            val detailById = numberById.mapNotNull { (id, num) ->
+            val standardDetailById = numberById.mapNotNull { (id, num) ->
                 detailByNumber[num]?.let { id to it }
             }.toMap()
+            val detailById = buildMap {
+                putAll(standardDetailById)
+                WantedYokaiCatalog.entries.forEach { wanted ->
+                    put(wanted.id, wanted.detail)
+                }
+            }
 
             YokaiMasterData(
                 nameById = nameById,

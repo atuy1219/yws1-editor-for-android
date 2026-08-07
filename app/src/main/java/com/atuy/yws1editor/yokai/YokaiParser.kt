@@ -117,6 +117,12 @@ class YokaiParser(
             val base = yokaiStart + entry.slot * yokaiSize
             if (base + yokaiSize > out.size) continue
 
+            val previousId = readIntLe(out, base + 0x04).toLong() and 0xFFFFFFFFL
+            if (previousId != entry.id) {
+                // The save record also carries the pet/nickname text. Leaving the old text
+                // behind makes a changed wanted Yo-kai appear under its previous/base name.
+                writeUtf8Name(out, base + 0x08, 36, entry.name)
+            }
             writeIntLe(out, base + 0x04, entry.id.toInt())
             out[base + 0x74] = clamp(entry.level, 0, 255).toByte()
             out[base + 0x4E] = clamp(entry.attackLevel, 0, 99).toByte()
@@ -132,6 +138,18 @@ class YokaiParser(
         }
 
         return out
+    }
+
+    private fun writeUtf8Name(data: ByteArray, offset: Int, size: Int, value: String) {
+        data.fill(0, offset, offset + size)
+        var cursor = offset
+        val end = offset + size - 1
+        for (char in value) {
+            val bytes = char.toString().toByteArray(Charsets.UTF_8)
+            if (cursor + bytes.size > end) break
+            bytes.copyInto(data, cursor)
+            cursor += bytes.size
+        }
     }
 
     private fun writeSignedByteStat5(data: ByteArray, offset: Int, stat: Stat5) {
