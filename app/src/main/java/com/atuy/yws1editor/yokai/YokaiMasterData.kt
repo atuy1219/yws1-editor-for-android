@@ -68,7 +68,13 @@ object YokaiMasterLoader {
                 ordered.add(id to name)
             }
 
-            val nameById = ordered.toMap()
+            val standardNameById = ordered.toMap()
+            val nameById = buildMap {
+                putAll(standardNameById)
+                WantedYokaiCatalog.entries.forEach { wanted ->
+                    putIfAbsent(wanted.id, wanted.name)
+                }
+            }
             val numberById = ordered.mapIndexed { index, pair ->
                 pair.first to (index + 1)
             }.toMap()
