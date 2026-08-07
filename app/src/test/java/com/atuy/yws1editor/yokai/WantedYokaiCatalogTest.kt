@@ -17,6 +17,16 @@ class WantedYokaiCatalogTest {
     }
 
     @Test
+    fun pentenShishoUsesItsOwnCharaParamStats() {
+        val penten = WantedYokaiCatalog.entries.single { it.name == "ペテン師匠" }
+
+        assertEquals("メラメライオン", penten.parentName)
+        assertEquals(Stat5(90, 1, 1, 26, 29), penten.detail.baseStats)
+        assertEquals(Stat5(0, 2, 0, 0, 0), penten.detail.growPattern)
+        assertEquals(1, penten.detail.yokaiClass)
+    }
+
+    @Test
     fun idsMatchParameterCrc32AndAreUnique() {
         val entries = WantedYokaiCatalog.entries
 
