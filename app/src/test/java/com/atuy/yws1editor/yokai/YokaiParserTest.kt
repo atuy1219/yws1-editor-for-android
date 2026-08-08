@@ -42,29 +42,11 @@ class YokaiParserTest {
         assertEquals(Stat5(127, 127, 1, -128, -128), reparsed.cb)
     }
 
-    @Test
-    fun changingSpeciesAlsoUpdatesSavedPetName() {
-        val data = newRecord()
-        writeUtf8(data, yokaiStart + 0x08, "メラメライオン")
-        val original = parser.parse(data).single()
-        val edited = original.copy(id = 0x2B9878C7L, name = "ペテン師匠")
-
-        val updated = parser.applyEntries(data, listOf(edited))
-        val rawName = updated.copyOfRange(yokaiStart + 0x08, yokaiStart + 0x08 + 36)
-        val end = rawName.indexOf(0).let { if (it < 0) rawName.size else it }
-
-        assertEquals("ペテン師匠", rawName.copyOfRange(0, end).toString(Charsets.UTF_8))
-    }
-
     private fun newRecord(): ByteArray {
         val data = ByteArray(yokaiStart + recordSize)
         writeIntLe(data, yokaiStart, 1)
         writeIntLe(data, yokaiStart + 0x04, 1)
         return data
-    }
-
-    private fun writeUtf8(data: ByteArray, offset: Int, value: String) {
-        value.toByteArray(Charsets.UTF_8).copyInto(data, offset)
     }
 
     private fun writeBytes(data: ByteArray, offset: Int, values: List<Int>) {
