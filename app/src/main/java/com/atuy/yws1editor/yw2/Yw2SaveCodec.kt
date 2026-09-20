@@ -57,24 +57,27 @@ data class Yw2InventoryEntry(
 )
 
 object Yw2SaveCodec {
-    const val YOKAI_OFFSET = 0x5108
     const val YOKAI_RECORD_SIZE = 0x5C
     const val YOKAI_MAX = 406
-    const val MONEY_OFFSET = 0x108E0
+    private const val YOKAI_SECTION_ID = 0x07
+    private const val MONEY_SECTION_ID = 0x09
+    private const val MONEY_SECTION_OFFSET = 0x14
 
     fun parseYokai(data: ByteArray): List<Yw2Yokai> {
+        val base = sectionDataStart(data, YOKAI_SECTION_ID, YOKAI_RECORD_SIZE * YOKAI_MAX)
         val out = ArrayList<Yw2Yokai>()
         for (slot in 0 until YOKAI_MAX) {
-            val o = YOKAI_OFFSET + slot * YOKAI_RECORD_SIZE
+            val o = base + slot * YOKAI_RECORD_SIZE
             if (o + YOKAI_RECORD_SIZE > data.size) break
+            val typeId = readU32(data, o + 4)
+            if (typeId == 0L) continue
             val num2 = readU16(data, o + 2)
-            if (num2 == 0) break
             val packed = data[o + 84].toInt() and 0xFF
             out += Yw2Yokai(
                 slot = slot,
                 num1 = readU16(data, o),
                 num2 = num2,
-                typeId = readU32(data, o + 4),
+                typeId = typeId,
                 nickname = readGameString(data, o + 8, 24),
                 attackLevel = data[o + 42].toInt() and 0xFF,
                 techniqueLevel = data[o + 46].toInt() and 0xFF,
@@ -96,7 +99,8 @@ object Yw2SaveCodec {
         validateIv(value.iv)
         validateEv(value.ev)
         if (value.slot !in 0 until YOKAI_MAX) throw IOException("妖怪スロットが範囲外です")
-        val o = YOKAI_OFFSET + value.slot * YOKAI_RECORD_SIZE
+        val base = sectionDataStart(data, YOKAI_SECTION_ID, YOKAI_RECORD_SIZE * YOKAI_MAX)
+        val o = base + value.slot * YOKAI_RECORD_SIZE
         if (o + YOKAI_RECORD_SIZE > data.size) throw IOException("妖怪レコードがセーブ範囲外です")
 
         return data.copyOf().also { out ->
@@ -205,14 +209,16 @@ object Yw2SaveCodec {
     }
 
     fun readMoney(data: ByteArray): Long {
-        if (MONEY_OFFSET + 4 > data.size) throw IOException("所持金領域がセーブ範囲外です")
-        return readU32(data, MONEY_OFFSET)
+        val base = sectionDataStart(data, MONEY_SECTION_ID, MONEY_SECTION_OFFSET + 4)
+        return readU32(data, base + MONEY_SECTION_OFFSET)
     }
 
     fun updateMoney(data: ByteArray, money: Long): ByteArray {
         if (money !in 0..0xFFFF_FFFFL) throw IOException("所持金が範囲外です")
-        if (MONEY_OFFSET + 4 > data.size) throw IOException("所持金領域がセーブ範囲外です")
-        return data.copyOf().also { writeU32(it, MONEY_OFFSET, money) }
+        val base = sectionDataStart(data, MONEY_SECTION_ID, MONEY_SECTION_OFFSET + 4)
+        return data.copyOf().also {
+            writeU32(it, base + MONEY_SECTION_OFFSET, money)
+        }
     }
 
     fun validateIv(stats: Yw2Stats) {
