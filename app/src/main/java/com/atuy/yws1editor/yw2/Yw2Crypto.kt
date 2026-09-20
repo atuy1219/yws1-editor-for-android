@@ -234,11 +234,12 @@ object Yw2Crypto {
                     validChildren = false
                     break
                 }
-                val child = runCatching { parseSaveSection(data, cursor, section) }
-                    .getOrElse {
-                        validChildren = false
-                        break
-                    }
+                val child = try {
+                    parseSaveSection(data, cursor, section)
+                } catch (_: IOException) {
+                    validChildren = false
+                    break
+                }
                 if (child.endExclusive > footerStart) {
                     validChildren = false
                     break
