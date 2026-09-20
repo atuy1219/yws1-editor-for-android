@@ -594,11 +594,19 @@ private fun YokaiList(
     master: Yw2MasterData,
     onUpdate: (Yw2Yokai) -> Unit,
 ) {
-    val entries = remember(data) { runCatching { Yw2SaveCodec.parseYokai(data) }.getOrDefault(emptyList()) }
+    val parseResult = remember(data) { runCatching { Yw2SaveCodec.parseYokai(data) } }
+    val entries = parseResult.getOrDefault(emptyList())
     var editing by remember { mutableStateOf<Yw2Yokai?>(null) }
 
     Column(Modifier.fillMaxSize()) {
         Text("妖怪: " + entries.size + "体", fontWeight = FontWeight.Bold)
+        parseResult.exceptionOrNull()?.let { error ->
+            Text(
+                "妖怪領域解析エラー: " + (error.message ?: error::class.java.simpleName),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         Spacer(Modifier.height(4.dp))
         LazyColumn(Modifier.fillMaxSize()) {
             items(entries, key = { it.slot }) { entry ->
@@ -736,13 +744,21 @@ private fun InventoryList(
     master: Yw2MasterData,
     onUpdate: (Yw2InventoryEntry) -> Unit,
 ) {
-    val entries = remember(data, kind) {
-        runCatching { Yw2SaveCodec.parseInventory(data, kind) }.getOrDefault(emptyList())
+    val parseResult = remember(data, kind) {
+        runCatching { Yw2SaveCodec.parseInventory(data, kind) }
     }
+    val entries = parseResult.getOrDefault(emptyList())
     var editing by remember { mutableStateOf<Yw2InventoryEntry?>(null) }
 
     Column(Modifier.fillMaxSize()) {
         Text(kind.label + ": " + entries.size + "件", fontWeight = FontWeight.Bold)
+        parseResult.exceptionOrNull()?.let { error ->
+            Text(
+                kind.label + "領域解析エラー: " + (error.message ?: error::class.java.simpleName),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         Spacer(Modifier.height(4.dp))
         LazyColumn(Modifier.fillMaxSize()) {
             items(entries, key = { it.slot }) { entry ->
@@ -858,8 +874,9 @@ private fun SaveInfoPanel(
     headName: String?,
     onUpdateMoney: (Long) -> Unit,
 ) {
-    val currentMoney = remember(data) { runCatching { Yw2SaveCodec.readMoney(data) }.getOrDefault(0L) }
-    var money by remember(currentMoney) { mutableStateOf(currentMoney.toString()) }
+    val moneyResult = remember(data) { runCatching { Yw2SaveCodec.readMoney(data) } }
+    val currentMoney = moneyResult.getOrNull()
+    var money by remember(data) { mutableStateOf(currentMoney?.toString().orEmpty()) }
 
     Column(
         modifier = Modifier
@@ -873,8 +890,21 @@ private fun SaveInfoPanel(
             Text("head.yw: " + (headName ?: "未選択"))
         }
         HorizontalDivider()
+        moneyResult.exceptionOrNull()?.let { error ->
+            Text(
+                "所持金領域解析エラー: " + (error.message ?: error::class.java.simpleName),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         NumberField("所持金", money) { money = it }
-        Button(onClick = { onUpdateMoney(money.toLongOrNull() ?: currentMoney) }) {
+        Button(
+            onClick = {
+                val fallback = currentMoney ?: return@Button
+                onUpdateMoney(money.toLongOrNull() ?: fallback)
+            },
+            enabled = currentMoney != null,
+        ) {
             Text("所持金を反映")
         }
         HorizontalDivider()
