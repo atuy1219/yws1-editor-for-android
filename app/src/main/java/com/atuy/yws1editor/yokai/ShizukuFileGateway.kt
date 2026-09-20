@@ -136,6 +136,18 @@ class ShizukuFileGateway {
         ShizukuFileServiceClient.writeFileAtomically(path, data)
     }
 
+    fun listFileNames(path: String): List<String> {
+        return ShizukuFileServiceClient.requireService().listFileNames(path)
+    }
+
+    fun createDirectories(path: String) {
+        ShizukuFileServiceClient.requireService().createDirectories(path)
+    }
+
+    fun copyFile(sourcePath: String, targetPath: String) {
+        ShizukuFileServiceClient.requireService().copyFile(sourcePath, targetPath)
+    }
+
     fun lastModifiedMillis(path: String): Long {
         return ShizukuFileServiceClient.requireService().lastModified(path)
     }
