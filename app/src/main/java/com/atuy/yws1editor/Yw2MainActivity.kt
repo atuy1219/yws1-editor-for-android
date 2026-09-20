@@ -54,6 +54,8 @@ import com.atuy.yws1editor.shizuku.ShizukuFileServiceClient
 import com.atuy.yws1editor.ui.theme.YwEditorTheme
 import com.atuy.yws1editor.yokai.ShizukuFileGateway
 import com.atuy.yws1editor.yw2.Yw2Crypto
+import com.atuy.yws1editor.yw2.Yw2EquipRef
+import com.atuy.yws1editor.yw2.Yw2EquippableEntry
 import com.atuy.yws1editor.yw2.Yw2InventoryEntry
 import com.atuy.yws1editor.yw2.Yw2InventoryKind
 import com.atuy.yws1editor.yw2.Yw2MasterData
@@ -607,6 +609,10 @@ private fun YokaiList(
 ) {
     val parseResult = remember(data) { runCatching { Yw2SaveCodec.parseYokai(data) } }
     val entries = parseResult.getOrDefault(emptyList())
+    val equippables = remember(data) {
+        runCatching { Yw2SaveCodec.equippableEntries(data) }.getOrDefault(emptyList())
+    }
+    val equippedByRef = remember(equippables) { equippables.associateBy { it.ref } }
     var editing by remember { mutableStateOf<Yw2Yokai?>(null) }
     var query by remember { mutableStateOf("") }
 
@@ -678,6 +684,19 @@ private fun YokaiList(
                                 "  EV " + entry.ev.values().joinToString("/"),
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        val equipped = listOf(entry.equip1, entry.equip2)
+                            .filterNot { it.isEmpty }
+                            .map { ref ->
+                                equippedDisplayName(
+                                    ref = ref,
+                                    entry = equippedByRef[ref],
+                                    master = master,
+                                )
+                            }
+                        Text(
+                            "装備: " + if (equipped.isEmpty()) "なし" else equipped.joinToString(" / "),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
@@ -687,6 +706,7 @@ private fun YokaiList(
     editing?.let { selected ->
         YokaiEditDialog(
             value = selected,
+            data = data,
             master = master,
             onDismiss = { editing = null },
             onSave = {
@@ -700,6 +720,7 @@ private fun YokaiList(
 @Composable
 private fun YokaiEditDialog(
     value: Yw2Yokai,
+    data: ByteArray,
     master: Yw2MasterData,
     onDismiss: () -> Unit,
     onSave: (Yw2Yokai) -> Unit,
@@ -715,7 +736,17 @@ private fun YokaiEditDialog(
     var iv by remember(value) { mutableStateOf(value.iv) }
     var ev by remember(value) { mutableStateOf(value.ev) }
     var sportsClub by remember(value) { mutableStateOf(value.sportsClub) }
+    var equip1 by remember(value) { mutableStateOf(value.equip1) }
+    var equip2 by remember(value) { mutableStateOf(value.equip2) }
     var picker by remember { mutableStateOf(false) }
+    var equipmentPickerSlot by remember { mutableStateOf<Int?>(null) }
+
+    val equippables = remember(data) {
+        runCatching { Yw2SaveCodec.equippableEntries(data) }.getOrDefault(emptyList())
+    }
+    val equippedByRef = remember(equippables) { equippables.associateBy { it.ref } }
+    val secondSlotSupported = master.equipmentSlotCount(typeId) >= 2
+    val allowSecondSlotEdit = secondSlotSupported || !equip2.isEmpty
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -744,6 +775,43 @@ private fun YokaiEditDialog(
                 StatsEditor(iv) { iv = it }
                 Text("育成値 EV", fontWeight = FontWeight.SemiBold)
                 StatsEditor(ev) { ev = it }
+                Text("装備", fontWeight = FontWeight.SemiBold)
+                OutlinedButton(
+                    onClick = { equipmentPickerSlot = 1 },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        "装備1: " + equippedDisplayName(
+                            ref = equip1,
+                            entry = equippedByRef[equip1],
+                            master = master,
+                        )
+                    )
+                }
+                OutlinedButton(
+                    onClick = { equipmentPickerSlot = 2 },
+                    enabled = allowSecondSlotEdit,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        "装備2: " + equippedDisplayName(
+                            ref = equip2,
+                            entry = equippedByRef[equip2],
+                            master = master,
+                        )
+                    )
+                }
+                if (!secondSlotSupported) {
+                    Text(
+                        if (equip2.isEmpty) {
+                            "この妖怪は通常、装備枠1つです"
+                        } else {
+                            "この妖怪は通常1枠ですが、既存の装備2を解除・変更できます"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text("スポーツクラブ", fontWeight = FontWeight.SemiBold)
                 SignedStatsEditor(sportsClub) { sportsClub = it }
                 Text(
@@ -768,6 +836,8 @@ private fun YokaiEditDialog(
                         iv = iv,
                         ev = ev,
                         sportsClub = sportsClub,
+                        equip1 = equip1,
+                        equip2 = equip2,
                     )
                 )
             }) { Text("反映") }
@@ -784,6 +854,21 @@ private fun YokaiEditDialog(
             onSelect = {
                 typeId = it.id
                 picker = false
+            },
+        )
+    }
+
+    equipmentPickerSlot?.let { slot ->
+        val currentRef = if (slot == 1) equip1 else equip2
+        EquippedItemDialog(
+            title = "装備" + slot + " を選択",
+            entries = equippables,
+            currentRef = currentRef,
+            master = master,
+            onDismiss = { equipmentPickerSlot = null },
+            onSelect = { selected ->
+                if (slot == 1) equip1 = selected else equip2 = selected
+                equipmentPickerSlot = null
             },
         )
     }
@@ -1053,6 +1138,119 @@ private fun NumberField(
         singleLine = true,
         modifier = modifier,
     )
+}
+
+private fun equippedDisplayName(
+    ref: Yw2EquipRef,
+    entry: Yw2EquippableEntry?,
+    master: Yw2MasterData,
+): String {
+    if (ref.isEmpty) return "なし"
+    if (entry == null) {
+        return "不明 (" + ref.num1.toString(16) + "/" + ref.num2.toString(16) + ")"
+    }
+    val name = master.inventoryName(entry.kind, entry.typeId)
+    return if (entry.kind == Yw2InventoryKind.SOUL) {
+        name + " Lv." + entry.level
+    } else {
+        name
+    }
+}
+
+@Composable
+private fun EquippedItemDialog(
+    title: String,
+    entries: List<Yw2EquippableEntry>,
+    currentRef: Yw2EquipRef,
+    master: Yw2MasterData,
+    onDismiss: () -> Unit,
+    onSelect: (Yw2EquipRef) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(entries, query) {
+        val term = query.trim()
+        if (term.isEmpty()) {
+            entries
+        } else {
+            entries.filter { entry ->
+                val name = master.inventoryName(entry.kind, entry.typeId)
+                name.contains(term, ignoreCase = true) ||
+                    entry.typeId.toString().contains(term) ||
+                    entry.typeId.toString(16).contains(term, ignoreCase = true)
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 620.dp)
+                    .padding(12.dp),
+            ) {
+                Text(title, style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("装備・魂を検索") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(Yw2EquipRef()) }
+                        .padding(vertical = 10.dp, horizontal = 4.dp),
+                ) {
+                    Text((if (currentRef.isEmpty) "● " else "") + "なし")
+                }
+                HorizontalDivider()
+                LazyColumn(Modifier.weight(1f, fill = false)) {
+                    items(
+                        filtered,
+                        key = { entry -> entry.kind.name + ":" + entry.inventorySlot },
+                    ) { entry ->
+                        val isCurrent = entry.ref == currentRef
+                        val hasFree = isCurrent || entry.used < entry.amount
+                        val name = master.inventoryName(entry.kind, entry.typeId)
+                        val detail = if (entry.kind == Yw2InventoryKind.SOUL) {
+                            "魂 Lv." + entry.level + " / " +
+                                if (entry.used == 0) "未使用" else "使用中"
+                        } else {
+                            "所持 " + entry.amount + " / 使用 " + entry.used
+                        }
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = hasFree) { onSelect(entry.ref) }
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                        ) {
+                            Column {
+                                Text(
+                                    (if (isCurrent) "● " else "") + name,
+                                    color = if (hasFree) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                                Text(
+                                    detail + if (hasFree) "" else " / 空きなし",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = onDismiss) { Text("閉じる") }
+            }
+        }
+    }
 }
 
 @Composable
