@@ -78,7 +78,7 @@ object Yw2SaveCodec {
                 num1 = readU16(data, o),
                 num2 = num2,
                 typeId = readU32(data, o + 4),
-                nickname = readUtf8(data, o + 8, 24),
+                nickname = readGameString(data, o + 8, 24),
                 attackLevel = data[o + 42].toInt() and 0xFF,
                 techniqueLevel = data[o + 46].toInt() and 0xFF,
                 soultimateLevel = data[o + 50].toInt() and 0xFF,
@@ -106,7 +106,7 @@ object Yw2SaveCodec {
             writeU16(out, o, value.num1)
             writeU16(out, o + 2, value.num2)
             writeU32(out, o + 4, value.typeId)
-            writeUtf8(out, o + 8, 24, value.nickname)
+            writeGameString(out, o + 8, 24, value.nickname)
             out[o + 42] = value.attackLevel.coerceIn(0, 255).toByte()
             out[o + 46] = value.techniqueLevel.coerceIn(0, 255).toByte()
             out[o + 50] = value.soultimateLevel.coerceIn(0, 255).toByte()
@@ -263,22 +263,24 @@ object Yw2SaveCodec {
         data[offset + 3] = ((value ushr 24) and 0xFF).toByte()
     }
 
-    private fun readUtf8(data: ByteArray, offset: Int, length: Int): String {
+    private val gameCharset: Charset by lazy { Charset.forName("Shift_JIS") }
+
+    private fun readGameString(data: ByteArray, offset: Int, length: Int): String {
         var end = offset
         val limit = minOf(data.size, offset + length)
         while (end < limit && data[end].toInt() != 0) end++
-        return runCatching { data.copyOfRange(offset, end).toString(Charsets.UTF_8) }.getOrDefault("")
+        return runCatching { String(data, offset, end - offset, gameCharset) }.getOrDefault("")
     }
 
-    private fun writeUtf8(data: ByteArray, offset: Int, length: Int, text: String) {
+    private fun writeGameString(data: ByteArray, offset: Int, length: Int, text: String) {
         for (i in 0 until length) data[offset + i] = 0
         val encoded = StringBuilder()
         for (ch in text) {
             val candidate = encoded.toString() + ch
-            if (candidate.toByteArray(Charsets.UTF_8).size >= length) break
+            if (candidate.toByteArray(gameCharset).size >= length) break
             encoded.append(ch)
         }
-        val bytes = encoded.toString().toByteArray(Charsets.UTF_8)
+        val bytes = encoded.toString().toByteArray(gameCharset)
         bytes.copyInto(data, offset, 0, minOf(bytes.size, length - 1))
     }
 }
