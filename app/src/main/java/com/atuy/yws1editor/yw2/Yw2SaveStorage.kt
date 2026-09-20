@@ -69,10 +69,9 @@ class Yw2SaveStorage(
         val encrypted = gateway.readBytes(file.path)
         val decoded = Yw2Crypto.decrypt(encrypted, headBytes)
 
-        // AES-CCM authentication + YW CRC already validate the encrypted file.
-        // Keep inventory parsing independent so one domain cannot block opening
-        // an otherwise valid save.
-        Yw2SaveCodec.parseYokai(decoded.data)
+        // AES-CCM authentication + YW CRC validate the encrypted file.
+        // Domain parsing is intentionally deferred to each editor tab so a
+        // parser bug cannot prevent opening a valid save.
 
         return Yw2LoadedSave(
             file = file,
@@ -111,8 +110,7 @@ class Yw2SaveStorage(
     }
 
     private fun verifyEncrypted(encrypted: ByteArray, headBytes: ByteArray?) {
-        val verify = Yw2Crypto.decrypt(encrypted, headBytes)
-        Yw2SaveCodec.parseYokai(verify.data)
+        Yw2Crypto.decrypt(encrypted, headBytes)
     }
 
     private fun createBackup(file: Yw2SaveFile): String {
