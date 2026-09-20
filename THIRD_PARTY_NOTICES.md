@@ -43,3 +43,12 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
+
+
+## ykw-editors / Yo-kai Editor 2
+
+YW2 branch includes a Kotlin port of save crypto/format logic and Japanese master data derived from:
+- https://github.com/atuy1219/ykw-editors
+- Original authors include togenyan and nobody_fear.
+
+These portions are distributed under the MIT License as stated in the referenced source files/repository. Copyright notices in the upstream sources are retained by reference here.
