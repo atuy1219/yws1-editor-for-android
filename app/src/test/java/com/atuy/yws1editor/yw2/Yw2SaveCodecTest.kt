@@ -52,7 +52,8 @@ class Yw2SaveCodecTest {
         putU16(data, soulSection + 2, 1)
         putU32(data, soulSection + 4, 0x01020304)
         putU16(data, soulSection + 8, 123)
-        putU16(data, soulSection + 10, 7)
+        data[soulSection + 10] = 10
+        data[soulSection + 11] = 1
 
         val yokaiSection = putSection(
             data = data,
@@ -107,7 +108,8 @@ class Yw2SaveCodecTest {
 
         val soul = Yw2SaveCodec.parseInventory(data, Yw2InventoryKind.SOUL).single()
         assertEquals(123, soul.experience)
-        assertEquals(7, soul.level)
+        assertEquals(10, soul.level)
+        assertEquals(1, soul.used)
 
         val changed = Yw2SaveCodec.updateYokai(data, yokai.copy(level = 88, nickname = "ジバ"))
         val reread = Yw2SaveCodec.parseYokai(changed).single()
