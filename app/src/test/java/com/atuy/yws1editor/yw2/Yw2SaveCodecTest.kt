@@ -73,6 +73,7 @@ class Yw2SaveCodecTest {
         putU32(data, y + 60, 5678)
         byteArrayOf(16, 8, 8, 8, 8).copyInto(data, y + 64)
         byteArrayOf(8, 4, 4, 4, 4).copyInto(data, y + 69)
+        byteArrayOf((-2).toByte(), 1, 0, (-1).toByte(), 2).copyInto(data, y + 74)
         data[y + 79] = 99.toByte()
         data[y + 84] = 0x53
 
@@ -91,6 +92,7 @@ class Yw2SaveCodecTest {
         assertEquals(99, yokai.level)
         assertEquals(5, yokai.loafLevel)
         assertEquals(3, yokai.attitude)
+        assertEquals(Yw2Stats(-2, 1, 0, -1, 2), yokai.statCorrection)
 
         val item = Yw2SaveCodec.parseInventory(data, Yw2InventoryKind.ITEM).single()
         assertEquals(7, item.amount)
@@ -111,6 +113,7 @@ class Yw2SaveCodecTest {
         val reread = Yw2SaveCodec.parseYokai(changed).single()
         assertEquals(88, reread.level)
         assertEquals("ジバ", reread.nickname)
+        assertEquals(Yw2Stats(-2, 1, 0, -1, 2), reread.statCorrection)
 
         val changedItem = Yw2SaveCodec.updateInventory(data, item.copy(amount = 99))
         assertEquals(99, Yw2SaveCodec.parseInventory(changedItem, Yw2InventoryKind.ITEM).single().amount)
