@@ -279,8 +279,10 @@ object Yw2SaveCodec {
                 Yw2InventoryKind.SOUL -> {
                     writeU16(out, o + 8, entry.experience.coerceIn(0, 65535))
                     out[o + 10] = entry.level.coerceIn(1, 10).toByte()
-                    out[o + 11] = entry.used.coerceIn(0, 255).toByte()
                 }
+            }
+            if (kind == Yw2InventoryKind.EQUIPMENT || kind == Yw2InventoryKind.SOUL) {
+                rebuildEquippedUsage(out)
             }
         }
     }
