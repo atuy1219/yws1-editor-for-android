@@ -2,7 +2,7 @@ name: Android CI Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "feature/yw2-editor" ]
   pull_request:
     branches: [ "main" ]
 
