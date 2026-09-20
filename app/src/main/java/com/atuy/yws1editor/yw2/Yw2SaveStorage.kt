@@ -88,6 +88,23 @@ class Yw2SaveStorage(
         keyMode: Yw2Crypto.KeyMode,
         headBytes: ByteArray?,
     ): Yw2SaveWriteResult {
+        // Before overwriting anything, prove that our writer can reproduce the
+        // current on-disk save byte-for-byte without edits. Because YW2 uses a
+        // deterministic nonce/seed-preserving pipeline, a mismatch means our
+        // serializer/encryption is not game-compatible yet.
+        val currentEncrypted = gateway.readBytes(file.path)
+        val currentDecoded = Yw2Crypto.decrypt(currentEncrypted, headBytes)
+        val noEditRoundTrip = Yw2Crypto.encrypt(
+            currentDecoded.data,
+            currentDecoded.keyMode,
+            headBytes,
+        )
+        if (!noEditRoundTrip.contentEquals(currentEncrypted)) {
+            throw IOException(
+                "安全のため保存を中止しました: 無編集再暗号化が元のgame*.ywと一致しません"
+            )
+        }
+
         val encrypted = Yw2Crypto.encrypt(decoded, keyMode, headBytes)
 
         // Verify the exact bytes before touching the emulator save.
