@@ -714,6 +714,7 @@ private fun YokaiEditDialog(
     var loaf by remember(value) { mutableStateOf(value.loafLevel.toString()) }
     var iv by remember(value) { mutableStateOf(value.iv) }
     var ev by remember(value) { mutableStateOf(value.ev) }
+    var sportsClub by remember(value) { mutableStateOf(value.sportsClub) }
     var picker by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -743,6 +744,12 @@ private fun YokaiEditDialog(
                 StatsEditor(iv) { iv = it }
                 Text("育成値 EV", fontWeight = FontWeight.SemiBold)
                 StatsEditor(ev) { ev = it }
+                Text("スポーツクラブ", fontWeight = FontWeight.SemiBold)
+                SignedStatsEditor(sportsClub) { sportsClub = it }
+                Text(
+                    "スポーツクラブ補正: 各能力 -10〜25",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Text("IV条件: HP/2 + 他4能力 = 40 / EV条件: <= 20", style = MaterialTheme.typography.bodySmall)
             }
         },
@@ -760,6 +767,7 @@ private fun YokaiEditDialog(
                         loafLevel = loaf.toIntOrNull() ?: value.loafLevel,
                         iv = iv,
                         ev = ev,
+                        sportsClub = sportsClub,
                     )
                 )
             }) { Text("反映") }
@@ -980,6 +988,53 @@ private fun StatsEditor(value: Yw2Stats, onChange: (Yw2Stats) -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun SignedStatsEditor(value: Yw2Stats, onChange: (Yw2Stats) -> Unit) {
+    val labels = listOf("HP", "力", "妖", "守", "速")
+    val values = value.values()
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        labels.forEachIndexed { index, label ->
+            var text by remember(value, index) { mutableStateOf(values[index].toString()) }
+            SignedNumberField(label, text, Modifier.weight(1f)) {
+                text = it
+                val number = it.toIntOrNull()
+                if (number != null && number in -10..25) {
+                    onChange(
+                        when (index) {
+                            0 -> value.copy(hp = number)
+                            1 -> value.copy(power = number)
+                            2 -> value.copy(spirit = number)
+                            3 -> value.copy(defense = number)
+                            else -> value.copy(speed = number)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SignedNumberField(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    onValueChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { text ->
+            val valid = text.isEmpty() ||
+                text == "-" ||
+                text.toIntOrNull()?.let { it in -10..25 } == true
+            if (valid) onValueChange(text)
+        },
+        label = { Text(label) },
+        singleLine = true,
+        modifier = modifier,
+    )
 }
 
 @Composable
