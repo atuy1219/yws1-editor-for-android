@@ -13,6 +13,26 @@ data class Yw2Stats(
     fun values(): List<Int> = listOf(hp, power, spirit, defense, speed)
 }
 
+data class Yw2EquipRef(
+    val num1: Int = 0,
+    val num2: Int = 0,
+) {
+    val isEmpty: Boolean get() = num1 == 0 && num2 == 0
+}
+
+data class Yw2EquippableEntry(
+    val kind: Yw2InventoryKind,
+    val inventorySlot: Int,
+    val num1: Int,
+    val num2: Int,
+    val typeId: Long,
+    val amount: Int,
+    val used: Int,
+    val level: Int = 0,
+) {
+    val ref: Yw2EquipRef get() = Yw2EquipRef(num1, num2)
+}
+
 data class Yw2Yokai(
     val slot: Int,
     val num1: Int,
@@ -24,6 +44,8 @@ data class Yw2Yokai(
     val soultimateLevel: Int,
     val experience: Long,
     val ownerId: Long,
+    val equip1: Yw2EquipRef,
+    val equip2: Yw2EquipRef,
     val iv: Yw2Stats,
     val ev: Yw2Stats,
     val sportsClub: Yw2Stats,
@@ -84,6 +106,14 @@ object Yw2SaveCodec {
                 soultimateLevel = data[o + 50].toInt() and 0xFF,
                 experience = readU32(data, o + 52),
                 ownerId = readU32(data, o + 60),
+                equip1 = Yw2EquipRef(
+                    num1 = readU16(data, o + 0x20),
+                    num2 = readU16(data, o + 0x22),
+                ),
+                equip2 = Yw2EquipRef(
+                    num1 = readU16(data, o + 0x24),
+                    num2 = readU16(data, o + 0x26),
+                ),
                 iv = readStats(data, o + 64),
                 ev = readStats(data, o + 69),
                 sportsClub = readSignedStats(data, o + 74),
@@ -98,6 +128,7 @@ object Yw2SaveCodec {
     fun updateYokai(data: ByteArray, value: Yw2Yokai): ByteArray {
         validateIv(value.iv)
         validateEv(value.ev)
+        validateSportsClub(value.sportsClub)
         if (value.slot !in 0 until YOKAI_MAX) throw IOException("妖怪スロットが範囲外です")
         val base = sectionDataStart(data, YOKAI_SECTION_ID, YOKAI_RECORD_SIZE * YOKAI_MAX)
         val o = base + value.slot * YOKAI_RECORD_SIZE
@@ -113,14 +144,57 @@ object Yw2SaveCodec {
             out[o + 50] = value.soultimateLevel.coerceIn(0, 255).toByte()
             writeU32(out, o + 52, value.experience)
             writeU32(out, o + 60, value.ownerId)
+            writeEquipRef(out, o + 0x20, value.equip1)
+            writeEquipRef(out, o + 0x24, value.equip2)
             writeStats(out, o + 64, value.iv)
             writeStats(out, o + 69, value.ev)
-            validateSportsClub(value.sportsClub)
             writeSignedStats(out, o + 74, value.sportsClub)
             out[o + 79] = value.level.coerceIn(1, 99).toByte()
             out[o + 84] = (
                 ((value.loafLevel.coerceIn(0, 15) shl 4) or value.attitude.coerceIn(0, 15))
             ).toByte()
+            rebuildEquippedUsage(out)
+        }
+    }
+
+    fun equippableEntries(data: ByteArray): List<Yw2EquippableEntry> =
+        buildList {
+            parseInventory(data, Yw2InventoryKind.EQUIPMENT).forEach { entry ->
+                add(
+                    Yw2EquippableEntry(
+                        kind = entry.kind,
+                        inventorySlot = entry.slot,
+                        num1 = entry.num1,
+                        num2 = entry.num2,
+                        typeId = entry.typeId,
+                        amount = entry.amount,
+                        used = entry.used,
+                    )
+                )
+            }
+            parseInventory(data, Yw2InventoryKind.SOUL).forEach { entry ->
+                add(
+                    Yw2EquippableEntry(
+                        kind = entry.kind,
+                        inventorySlot = entry.slot,
+                        num1 = entry.num1,
+                        num2 = entry.num2,
+                        typeId = entry.typeId,
+                        amount = 1,
+                        used = if (entry.used != 0) 1 else 0,
+                        level = entry.level,
+                    )
+                )
+            }
+        }
+
+    fun resolveEquipped(
+        data: ByteArray,
+        ref: Yw2EquipRef,
+    ): Yw2EquippableEntry? {
+        if (ref.isEmpty) return null
+        return equippableEntries(data).firstOrNull {
+            it.num1 == ref.num1 && it.num2 == ref.num2
         }
     }
 
@@ -152,8 +226,8 @@ object Yw2SaveCodec {
                     num1 = num1,
                     num2 = num2,
                     typeId = typeId,
-                    amount = data[o + 8].toInt() and 0xFF,
-                    used = data[o + 12].toInt() and 0xFF,
+                    amount = readU32(data, o + 8).toInt(),
+                    used = readU32(data, o + 12).toInt(),
                 )
                 Yw2InventoryKind.IMPORTANT -> Yw2InventoryEntry(
                     kind = kind,
@@ -198,8 +272,8 @@ object Yw2SaveCodec {
                     out[o + 8] = entry.amount.coerceIn(0, 255).toByte()
                 }
                 Yw2InventoryKind.EQUIPMENT -> {
-                    out[o + 8] = entry.amount.coerceIn(0, 255).toByte()
-                    out[o + 12] = entry.used.coerceIn(0, 255).toByte()
+                    writeU32(out, o + 8, entry.amount.coerceAtLeast(0).toLong())
+                    writeU32(out, o + 12, entry.used.coerceAtLeast(0).toLong())
                 }
                 Yw2InventoryKind.IMPORTANT -> Unit
                 Yw2InventoryKind.SOUL -> {
@@ -273,6 +347,88 @@ object Yw2SaveCodec {
         throw IOException(
             "YW2の${sectionId.toString(16).uppercase()}セクションを特定できません"
         )
+    }
+
+    private fun writeEquipRef(data: ByteArray, offset: Int, ref: Yw2EquipRef) {
+        if ((ref.num1 == 0) != (ref.num2 == 0)) {
+            throw IOException("装備参照が不完全です")
+        }
+        writeU16(data, offset, ref.num1)
+        writeU16(data, offset + 2, ref.num2)
+    }
+
+    private fun rebuildEquippedUsage(data: ByteArray) {
+        val equipmentBase = sectionDataStart(
+            data,
+            Yw2InventoryKind.EQUIPMENT.sectionId,
+            Yw2InventoryKind.EQUIPMENT.recordSize * Yw2InventoryKind.EQUIPMENT.maxEntries,
+        )
+        val soulBase = sectionDataStart(
+            data,
+            Yw2InventoryKind.SOUL.sectionId,
+            Yw2InventoryKind.SOUL.recordSize * Yw2InventoryKind.SOUL.maxEntries,
+        )
+
+        val equipmentByRef = HashMap<Yw2EquipRef, Int>()
+        val equipmentAmounts = IntArray(Yw2InventoryKind.EQUIPMENT.maxEntries)
+        for (slot in 0 until Yw2InventoryKind.EQUIPMENT.maxEntries) {
+            val o = equipmentBase + slot * Yw2InventoryKind.EQUIPMENT.recordSize
+            val typeId = readU32(data, o + 4)
+            if (typeId == 0L) continue
+            val ref = Yw2EquipRef(readU16(data, o), readU16(data, o + 2))
+            equipmentByRef[ref] = slot
+            equipmentAmounts[slot] = readU32(data, o + 8).toInt()
+        }
+
+        val soulByRef = HashMap<Yw2EquipRef, Int>()
+        for (slot in 0 until Yw2InventoryKind.SOUL.maxEntries) {
+            val o = soulBase + slot * Yw2InventoryKind.SOUL.recordSize
+            val typeId = readU32(data, o + 4)
+            if (typeId == 0L) continue
+            soulByRef[Yw2EquipRef(readU16(data, o), readU16(data, o + 2))] = slot
+        }
+
+        val equipmentUsage = IntArray(Yw2InventoryKind.EQUIPMENT.maxEntries)
+        val soulUsage = IntArray(Yw2InventoryKind.SOUL.maxEntries)
+        val yokaiBase = sectionDataStart(data, YOKAI_SECTION_ID, YOKAI_RECORD_SIZE * YOKAI_MAX)
+        for (slot in 0 until YOKAI_MAX) {
+            val o = yokaiBase + slot * YOKAI_RECORD_SIZE
+            if (readU32(data, o + 4) == 0L) continue
+            val refs = arrayOf(
+                Yw2EquipRef(readU16(data, o + 0x20), readU16(data, o + 0x22)),
+                Yw2EquipRef(readU16(data, o + 0x24), readU16(data, o + 0x26)),
+            )
+            refs.forEach { ref ->
+                if (ref.isEmpty) return@forEach
+                val equipmentSlot = equipmentByRef[ref]
+                if (equipmentSlot != null) {
+                    equipmentUsage[equipmentSlot]++
+                    return@forEach
+                }
+                val soulSlot = soulByRef[ref]
+                    ?: throw IOException(
+                        "妖怪 #$slot の装備参照 " +
+                            "${ref.num1.toString(16)}/${ref.num2.toString(16)} が持ち物に存在しません"
+                    )
+                soulUsage[soulSlot]++
+            }
+        }
+
+        equipmentUsage.forEachIndexed { slot, used ->
+            if (used > equipmentAmounts[slot]) {
+                throw IOException(
+                    "装備 #$slot の使用数 $used が所持数 ${equipmentAmounts[slot]} を超えています"
+                )
+            }
+            val o = equipmentBase + slot * Yw2InventoryKind.EQUIPMENT.recordSize
+            if (readU32(data, o + 4) != 0L) writeU32(data, o + 12, used.toLong())
+        }
+
+        soulUsage.forEachIndexed { slot, used ->
+            if (used > 1) throw IOException("魂 #$slot が複数の装備枠から参照されています")
+            val o = soulBase + slot * Yw2InventoryKind.SOUL.recordSize
+            if (readU32(data, o + 4) != 0L) data[o + 11] = if (used == 0) 0 else 1
+        }
     }
 
     private fun readStats(data: ByteArray, offset: Int) = Yw2Stats(
