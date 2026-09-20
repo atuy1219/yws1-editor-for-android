@@ -1,5 +1,6 @@
 package com.atuy.yws1editor.yw2
 
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.security.MessageDigest
 import java.util.zip.CRC32
@@ -65,7 +66,8 @@ object Yw2Crypto {
         }
 
         val body = decoded.copyOfRange(HEADER_SIZE, decoded.size)
-        val ywEncrypted = ywTransform(body, encrypt = true)
+        val orderedBody = reorderSectionsForWrite(body)
+        val ywEncrypted = ywTransform(orderedBody, encrypt = true)
         return ccmEncrypt(ywEncrypted, nonce, key)
     }
 
@@ -98,6 +100,182 @@ object Yw2Crypto {
         if (data.copyOfRange(12, 16).any { it.toInt() != 0 }) {
             throw IOException("game*.yw のnonceヘッダーが不正です")
         }
+    }
+
+    private val SAVE_SECTION_DEFAULT_ORDER = intArrayOf(
+        0x01, 0x03, 0x0B, 0x0F, 0x10, 0x11, 0x02, 0x07,
+        0x08, 0x0C, 0x0D, 0x0E, 0x12, 0x14, 0x15, 0x00,
+    )
+
+    private class SaveSection(
+        val id: Int,
+        val size: Int,
+        val headerStart: Int,
+        val bodyStart: Int,
+        val footerStart: Int,
+        var parent: SaveSection? = null,
+        val children: MutableList<SaveSection> = mutableListOf(),
+    ) {
+        val endExclusive: Int get() = footerStart + 4
+    }
+
+    /**
+     * ykw-editors' SaveManager::writeout() always runs reorderF3() before
+     * encrypting. The game derives the expected F3 section order from CRC32
+     * of sections 0x01 and 0x07, so changing section 0x07 without reordering
+     * produces a structurally decryptable file that the game rejects.
+     *
+     * Input here is the decrypted YW layer:
+     *   serialized section tree + stored CRC32 + YWCipher seed
+     */
+    private fun reorderSectionsForWrite(bodyWithTrailer: ByteArray): ByteArray {
+        if (bodyWithTrailer.size < 20) throw IOException("YW2復号データが短すぎます")
+        val payloadSize = bodyWithTrailer.size - 8
+        val payload = bodyWithTrailer.copyOfRange(0, payloadSize)
+        val root = parseSaveSection(payload, 0, null)
+        if (root.endExclusive != payload.size) {
+            throw IOException(
+                "YW2セクションツリー終端が不正です: " +
+                    root.endExclusive.toString(16) + "/" + payload.size.toString(16)
+            )
+        }
+
+        val firstById = linkedMapOf<Int, SaveSection>()
+        fun collect(section: SaveSection) {
+            firstById.putIfAbsent(section.id, section)
+            section.children.forEach(::collect)
+        }
+        collect(root)
+
+        val section01 = firstById[0x01]
+            ?: throw IOException("YW2 section 01 が見つかりません")
+        val section07 = firstById[0x07]
+            ?: throw IOException("YW2 section 07 が見つかりません")
+
+        val order = SAVE_SECTION_DEFAULT_ORDER.copyOf()
+        val rng01 = XorShift(crc32(payload, section01.headerStart, section01.endExclusive - section01.headerStart))
+        val rng07 = XorShift(crc32(payload, section07.headerStart, section07.endExclusive - section07.headerStart))
+
+        for (i in 5 downTo 1) {
+            val r = rng01.next(i + 1).toInt()
+            val a = r + 1
+            val tmp = order[a]
+            order[a] = order[i + 1]
+            order[i + 1] = tmp
+        }
+        for (i in 6 downTo 1) {
+            val r = rng07.next(i + 1).toInt()
+            val a = r + 8
+            val tmp = order[a]
+            order[a] = order[i + 8]
+            order[i + 8] = tmp
+        }
+
+        order.forEach { id ->
+            val section = firstById[id] ?: return@forEach
+            val parent = section.parent ?: return@forEach
+            if (parent.children.remove(section)) {
+                parent.children.add(section)
+            }
+        }
+
+        val serialized = ByteArrayOutputStream(payload.size)
+        writeSaveSection(payload, root, serialized)
+        val reorderedPayload = serialized.toByteArray()
+        if (reorderedPayload.size != payload.size) {
+            throw IOException(
+                "YW2セクション再構築サイズが変化しました: " +
+                    reorderedPayload.size + "/" + payload.size
+            )
+        }
+
+        return ByteArray(bodyWithTrailer.size).also { out ->
+            reorderedPayload.copyInto(out, 0)
+            bodyWithTrailer.copyInto(out, payloadSize, payloadSize, bodyWithTrailer.size)
+        }
+    }
+
+    private fun parseSaveSection(
+        data: ByteArray,
+        headerStart: Int,
+        parent: SaveSection?,
+    ): SaveSection {
+        if (headerStart < 0 || headerStart + 12 > data.size) {
+            throw IOException("YW2セクションヘッダーが範囲外です")
+        }
+        if (readU16Le(data, headerStart) != 0xFFFE) {
+            throw IOException("YW2セクション開始マーカーが不正です")
+        }
+
+        val descriptor = readU32Le(data, headerStart + 4)
+        val id = (descriptor and 0xFF).toInt()
+        val size = (descriptor ushr 8).toInt()
+        val bodyStart = headerStart + 8
+        val footerStart = bodyStart + size
+        if (footerStart + 4 > data.size || readU16Le(data, footerStart) != 0xFEFF) {
+            throw IOException("YW2 section ${id.toString(16)} の終端が不正です")
+        }
+
+        val section = SaveSection(
+            id = id,
+            size = size,
+            headerStart = headerStart,
+            bodyStart = bodyStart,
+            footerStart = footerStart,
+            parent = parent,
+        )
+
+        if (bodyStart < footerStart && readU16Le(data, bodyStart) == 0xFFFE) {
+            val candidates = mutableListOf<SaveSection>()
+            var cursor = bodyStart
+            var validChildren = true
+            while (cursor < footerStart) {
+                if (cursor + 12 > footerStart || readU16Le(data, cursor) != 0xFFFE) {
+                    validChildren = false
+                    break
+                }
+                val child = runCatching { parseSaveSection(data, cursor, section) }
+                    .getOrElse {
+                        validChildren = false
+                        break
+                    }
+                if (child.endExclusive > footerStart) {
+                    validChildren = false
+                    break
+                }
+                candidates += child
+                cursor = child.endExclusive
+            }
+            if (validChildren && cursor == footerStart && candidates.isNotEmpty()) {
+                section.children += candidates
+            }
+        }
+
+        return section
+    }
+
+    private fun writeSaveSection(
+        source: ByteArray,
+        section: SaveSection,
+        out: ByteArrayOutputStream,
+    ) {
+        out.write(source, section.headerStart, 8)
+        if (section.children.isEmpty()) {
+            out.write(
+                source,
+                section.bodyStart,
+                section.endExclusive - section.bodyStart,
+            )
+        } else {
+            section.children.forEach { child -> writeSaveSection(source, child, out) }
+            out.write(source, section.footerStart, 4)
+        }
+    }
+
+    private fun readU16Le(data: ByteArray, offset: Int): Int {
+        if (offset < 0 || offset + 2 > data.size) throw IOException("u16 read範囲外です")
+        return (data[offset].toInt() and 0xFF) or
+            ((data[offset + 1].toInt() and 0xFF) shl 8)
     }
 
     private fun ywTransform(data: ByteArray, encrypt: Boolean): ByteArray {
