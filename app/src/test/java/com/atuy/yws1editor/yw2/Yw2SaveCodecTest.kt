@@ -54,8 +54,15 @@ class Yw2SaveCodecTest {
         putU16(data, soulSection + 8, 123)
         putU16(data, soulSection + 10, 7)
 
-        val y = Yw2SaveCodec.YOKAI_OFFSET
-        putU16(data, y, 0)
+        val yokaiSection = putSection(
+            data = data,
+            header = 0x3000,
+            id = 0x07,
+            size = Yw2SaveCodec.YOKAI_RECORD_SIZE * Yw2SaveCodec.YOKAI_MAX,
+        )
+        // Leave slots 0..2 empty to ensure sparse storage does not stop parsing.
+        val y = yokaiSection + Yw2SaveCodec.YOKAI_RECORD_SIZE * 3
+        putU16(data, y, 3)
         putU16(data, y + 2, 1)
         putU32(data, y + 4, 0x10203040)
         "テスト".toByteArray(Charset.forName("Shift_JIS")).copyInto(data, y + 8)
@@ -69,7 +76,16 @@ class Yw2SaveCodecTest {
         data[y + 79] = 99.toByte()
         data[y + 84] = 0x53
 
+        val moneySection = putSection(
+            data = data,
+            header = 0xD000,
+            id = 0x09,
+            size = 0x100,
+        )
+        putU32(data, moneySection + 0x14, 123456)
+
         val yokai = Yw2SaveCodec.parseYokai(data).single()
+        assertEquals(3, yokai.slot)
         assertEquals(0x10203040L, yokai.typeId)
         assertEquals("テスト", yokai.nickname)
         assertEquals(99, yokai.level)
@@ -98,6 +114,10 @@ class Yw2SaveCodecTest {
 
         val changedItem = Yw2SaveCodec.updateInventory(data, item.copy(amount = 99))
         assertEquals(99, Yw2SaveCodec.parseInventory(changedItem, Yw2InventoryKind.ITEM).single().amount)
+
+        assertEquals(123456L, Yw2SaveCodec.readMoney(data))
+        val changedMoney = Yw2SaveCodec.updateMoney(data, 654321)
+        assertEquals(654321L, Yw2SaveCodec.readMoney(changedMoney))
     }
 
     @Test
