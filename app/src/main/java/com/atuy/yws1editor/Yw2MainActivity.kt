@@ -409,6 +409,18 @@ private fun Yw2EditorScreen(
                                         result.encrypted to result.backupPath
                                     } else {
                                         withContext(Dispatchers.IO) {
+                                            val saveHead = current.headBytes ?: headBytes
+                                            val originalDecoded =
+                                                Yw2Crypto.decrypt(current.originalEncrypted, saveHead)
+                                            val noEditRoundTrip = Yw2Crypto.encrypt(
+                                                originalDecoded.data,
+                                                originalDecoded.keyMode,
+                                                saveHead,
+                                            )
+                                            check(noEditRoundTrip.contentEquals(current.originalEncrypted)) {
+                                                "安全のため保存を中止しました: 無編集再暗号化が元のgame*.ywと一致しません"
+                                            }
+
                                             val backupDir = File(context.filesDir, "yw2-backups").apply { mkdirs() }
                                             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                                             val safeName =
@@ -416,7 +428,6 @@ private fun Yw2EditorScreen(
                                             val backup = File(backupDir, safeName + "." + stamp + ".bak")
                                             backup.writeBytes(current.originalEncrypted)
 
-                                            val saveHead = current.headBytes ?: headBytes
                                             val encrypted =
                                                 Yw2Crypto.encrypt(current.decoded, current.keyMode, saveHead)
                                             val verify = Yw2Crypto.decrypt(encrypted, saveHead)
