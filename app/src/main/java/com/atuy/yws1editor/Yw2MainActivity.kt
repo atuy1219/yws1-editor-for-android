@@ -1,6 +1,7 @@
 package com.atuy.yws1editor
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -37,49 +38,178 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.atuy.yws1editor.shizuku.ShizukuFileServiceClient
 import com.atuy.yws1editor.ui.theme.YwEditorTheme
+import com.atuy.yws1editor.yokai.ShizukuFileGateway
 import com.atuy.yws1editor.yw2.Yw2Crypto
 import com.atuy.yws1editor.yw2.Yw2InventoryEntry
 import com.atuy.yws1editor.yw2.Yw2InventoryKind
 import com.atuy.yws1editor.yw2.Yw2MasterData
 import com.atuy.yws1editor.yw2.Yw2NamedId
 import com.atuy.yws1editor.yw2.Yw2SaveCodec
+import com.atuy.yws1editor.yw2.Yw2SaveFile
+import com.atuy.yws1editor.yw2.Yw2SaveStorage
 import com.atuy.yws1editor.yw2.Yw2Stats
 import com.atuy.yws1editor.yw2.Yw2Yokai
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import rikka.shizuku.Shizuku
 
 class Yw2MainActivity : ComponentActivity() {
+    private val gateway = ShizukuFileGateway()
+    private val requestCode = 2002
+    private var shizukuGranted by mutableStateOf(false)
+    private var shizukuStatusMessage by mutableStateOf("Shizukuへ接続中...")
+    private var permissionRequestPending = false
+
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        requestShizukuPermissionIfNeeded()
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        permissionRequestPending = false
+        shizukuGranted = false
+        shizukuStatusMessage = "Shizukuとの接続が切れました"
+        ShizukuFileServiceClient.reset()
+    }
+
+    private val permissionListener =
+        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            if (requestCode != this.requestCode) return@OnRequestPermissionResultListener
+            runOnUiThread {
+                permissionRequestPending = false
+                if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                    connectFileServiceIfRoot()
+                } else {
+                    shizukuGranted = false
+                    shizukuStatusMessage = "Shizukuの許可が拒否されました"
+                }
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Shizuku.addRequestPermissionResultListener(permissionListener)
+        Shizuku.addBinderDeadListener(binderDeadListener)
+        Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
+
         setContent {
             YwEditorTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    Yw2EditorScreen()
+                    Yw2EditorScreen(
+                        gateway = gateway,
+                        shizukuGranted = shizukuGranted,
+                        shizukuStatusMessage = shizukuStatusMessage,
+                    )
                 }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        requestShizukuPermissionIfNeeded()
+    }
+
+    override fun onDestroy() {
+        Shizuku.removeBinderReceivedListener(binderReceivedListener)
+        Shizuku.removeBinderDeadListener(binderDeadListener)
+        Shizuku.removeRequestPermissionResultListener(permissionListener)
+        ShizukuFileServiceClient.setStateListener(null)
+        super.onDestroy()
+    }
+
+    private fun connectFileServiceIfRoot() {
+        val uid = gateway.serverUid()
+        if (uid != 0) {
+            shizukuGranted = false
+            shizukuStatusMessage = if (uid == 2000) {
+                "ShizukuはADBモードです。Citraセーブの直接編集にはrootモードが必要です"
+            } else {
+                "Shizukuの実行権限を確認できません"
+            }
+            ShizukuFileServiceClient.reset()
+            return
+        }
+
+        shizukuStatusMessage = "Shizukuファイルサービスへ接続中..."
+        ShizukuFileServiceClient.setStateListener { ready ->
+            runOnUiThread {
+                shizukuGranted = ready
+                shizukuStatusMessage =
+                    if (ready) "" else "Shizukuファイルサービスへ接続できません"
+            }
+        }
+        runCatching {
+            ShizukuFileServiceClient.bind(applicationContext)
+        }.onFailure { error ->
+            shizukuGranted = false
+            shizukuStatusMessage = "Shizukuファイルサービス接続失敗: ${error.message}"
+        }
+    }
+
+    private fun requestShizukuPermissionIfNeeded() {
+        if (!gateway.isShizukuRunning()) {
+            permissionRequestPending = false
+            shizukuGranted = false
+            shizukuStatusMessage = "Shizukuを起動してください"
+            return
+        }
+
+        if (gateway.isPreV11()) {
+            shizukuGranted = false
+            shizukuStatusMessage = "このShizuku APIバージョンには対応していません"
+            return
+        }
+
+        if (gateway.hasPermission()) {
+            permissionRequestPending = false
+            connectFileServiceIfRoot()
+            return
+        }
+
+        shizukuGranted = false
+        if (gateway.shouldShowRequestPermissionRationale()) {
+            permissionRequestPending = false
+            shizukuStatusMessage = "Shizukuアプリの認可済みアプリ画面から許可してください"
+            return
+        }
+
+        if (!permissionRequestPending) {
+            shizukuStatusMessage = "Shizukuの許可を待っています..."
+            permissionRequestPending = gateway.requestPermission(requestCode)
+            if (!permissionRequestPending) {
+                shizukuStatusMessage = "Shizukuの許可要求を開始できませんでした"
             }
         }
     }
 }
 
 private data class Yw2Session(
-    val uri: Uri,
+    val uri: Uri? = null,
+    val directFile: Yw2SaveFile? = null,
     val fileName: String,
     val originalEncrypted: ByteArray,
     val decoded: ByteArray,
     val keyMode: Yw2Crypto.KeyMode,
+    val headBytes: ByteArray? = null,
 )
 
 private enum class Yw2Tab(val label: String) {
@@ -92,16 +222,51 @@ private enum class Yw2Tab(val label: String) {
 }
 
 @Composable
-private fun Yw2EditorScreen() {
+private fun Yw2EditorScreen(
+    gateway: ShizukuFileGateway,
+    shizukuGranted: Boolean,
+    shizukuStatusMessage: String,
+) {
     val context = LocalContext.current
     val master = remember { Yw2MasterData(context) }
+    val scope = rememberCoroutineScope()
+    val directStorage = remember(gateway) { Yw2SaveStorage(gateway) }
 
     var session by remember { mutableStateOf<Yw2Session?>(null) }
     var headBytes by remember { mutableStateOf<ByteArray?>(null) }
     var headName by remember { mutableStateOf<String?>(null) }
-    var status by remember { mutableStateOf("game*.yw を開いてください") }
+    var status by remember { mutableStateOf("CitraのYW2セーブを自動検索します") }
     var busy by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableIntStateOf(0) }
+    var discoveredGames by remember { mutableStateOf<List<Yw2SaveFile>>(emptyList()) }
+    var directHeadPath by remember { mutableStateOf<String?>(null) }
+
+    val openDirectSave: (Yw2SaveFile) -> Unit = { file ->
+        scope.launch {
+            busy = true
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    directStorage.load(file, directHeadPath)
+                }
+            }.onSuccess { loaded ->
+                headBytes = loaded.headBytes
+                headName = if (loaded.headBytes != null) "head.yw (自動)" else null
+                session = Yw2Session(
+                    directFile = loaded.file,
+                    fileName = loaded.file.fileName,
+                    originalEncrypted = loaded.encrypted,
+                    decoded = loaded.decoded,
+                    keyMode = loaded.keyMode,
+                    headBytes = loaded.headBytes,
+                )
+                status = loaded.file.fileName + " / " + loaded.keyMode.label + " / 直接編集"
+                selectedTab = 0
+            }.onFailure {
+                status = "自動読込失敗: " + (it.message ?: it::class.java.simpleName)
+            }
+            busy = false
+        }
+    }
 
     val headPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -139,6 +304,7 @@ private fun Yw2EditorScreen() {
                     originalEncrypted = encrypted,
                     decoded = decoded.data,
                     keyMode = decoded.keyMode,
+                    headBytes = headBytes,
                 )
             }.onSuccess {
                 session = it
@@ -149,6 +315,54 @@ private fun Yw2EditorScreen() {
             }
             busy = false
         }
+    }
+
+    LaunchedEffect(shizukuGranted) {
+        if (!shizukuGranted) return@LaunchedEffect
+
+        busy = true
+        runCatching {
+            withContext(Dispatchers.IO) { directStorage.discover() }
+        }.onSuccess { discovery ->
+            discoveredGames = discovery.gameFiles
+            directHeadPath = discovery.headPath
+            when (discovery.gameFiles.size) {
+                0 -> {
+                    status = "指定パスに game*.yw が見つかりません: " + discovery.directory
+                }
+                1 -> {
+                    val file = discovery.gameFiles.single()
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            directStorage.load(file, discovery.headPath)
+                        }
+                    }.onSuccess { loaded ->
+                        headBytes = loaded.headBytes
+                        headName = if (loaded.headBytes != null) "head.yw (自動)" else null
+                        session = Yw2Session(
+                            directFile = loaded.file,
+                            fileName = loaded.file.fileName,
+                            originalEncrypted = loaded.encrypted,
+                            decoded = loaded.decoded,
+                            keyMode = loaded.keyMode,
+                            headBytes = loaded.headBytes,
+                        )
+                        status = loaded.file.fileName + " / " + loaded.keyMode.label + " / 自動読込"
+                        selectedTab = 0
+                    }.onFailure {
+                        status = "自動読込失敗: " + (it.message ?: it::class.java.simpleName)
+                    }
+                }
+                else -> {
+                    status = "game*.yw を " + discovery.gameFiles.size + " 件検出しました。編集するセーブを選択してください"
+                }
+            }
+        }.onFailure {
+            discoveredGames = emptyList()
+            directHeadPath = null
+            status = "自動検索失敗: " + (it.message ?: it::class.java.simpleName)
+        }
+        busy = false
     }
 
     Scaffold { padding ->
@@ -177,30 +391,52 @@ private fun Yw2EditorScreen() {
                 if (session != null) {
                     Button(
                         onClick = {
-                            busy = true
                             val current = session ?: return@Button
-                            runCatching {
-                                val backupDir = File(context.filesDir, "yw2-backups").apply { mkdirs() }
-                                val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                                val safeName = current.fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
-                                File(backupDir, safeName + "." + stamp + ".bak")
-                                    .writeBytes(current.originalEncrypted)
+                            scope.launch {
+                                busy = true
+                                runCatching {
+                                    val directFile = current.directFile
+                                    if (directFile != null) {
+                                        val result = withContext(Dispatchers.IO) {
+                                            directStorage.save(
+                                                file = directFile,
+                                                decoded = current.decoded,
+                                                keyMode = current.keyMode,
+                                                headBytes = current.headBytes,
+                                            )
+                                        }
+                                        result.encrypted to result.backupPath
+                                    } else {
+                                        withContext(Dispatchers.IO) {
+                                            val backupDir = File(context.filesDir, "yw2-backups").apply { mkdirs() }
+                                            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                                            val safeName =
+                                                current.fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                                            val backup = File(backupDir, safeName + "." + stamp + ".bak")
+                                            backup.writeBytes(current.originalEncrypted)
 
-                                val encrypted = Yw2Crypto.encrypt(current.decoded, current.keyMode, headBytes)
-                                val verify = Yw2Crypto.decrypt(encrypted, headBytes)
-                                Yw2SaveCodec.parseYokai(verify.data)
-                                context.contentResolver.openOutputStream(current.uri, "wt")?.use {
-                                    it.write(encrypted)
-                                    it.flush()
-                                } ?: error("選択ファイルへ書き込めません")
-                                encrypted
-                            }.onSuccess { encrypted ->
-                                session = current.copy(originalEncrypted = encrypted)
-                                status = "保存完了。バックアップはアプリ内部の yw2-backups に作成しました"
-                            }.onFailure {
-                                status = "保存失敗: " + (it.message ?: it::class.java.simpleName)
+                                            val saveHead = current.headBytes ?: headBytes
+                                            val encrypted =
+                                                Yw2Crypto.encrypt(current.decoded, current.keyMode, saveHead)
+                                            val verify = Yw2Crypto.decrypt(encrypted, saveHead)
+                                            Yw2SaveCodec.parseYokai(verify.data)
+                                            val uri = current.uri
+                                                ?: error("保存先URIを取得できません")
+                                            context.contentResolver.openOutputStream(uri, "wt")?.use {
+                                                it.write(encrypted)
+                                                it.flush()
+                                            } ?: error("選択ファイルへ書き込めません")
+                                            encrypted to backup.path
+                                        }
+                                    }
+                                }.onSuccess { (encrypted, backupPath) ->
+                                    session = current.copy(originalEncrypted = encrypted)
+                                    status = "保存完了 / バックアップ: " + backupPath
+                                }.onFailure {
+                                    status = "保存失敗: " + (it.message ?: it::class.java.simpleName)
+                                }
+                                busy = false
                             }
-                            busy = false
                         },
                         enabled = !busy,
                     ) {
@@ -219,8 +455,38 @@ private fun Yw2EditorScreen() {
             val current = session
             if (current == null) {
                 Spacer(Modifier.height(16.dp))
+                if (!shizukuGranted) {
+                    Text(
+                        shizukuStatusMessage.ifBlank { "Shizuku(root)への接続が必要です" },
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                } else {
+                    Text(
+                        "自動検出先:",
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        Yw2SaveStorage.DEFAULT_SAVE_DIRECTORY,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (discoveredGames.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        discoveredGames.forEach { file ->
+                            OutlinedButton(
+                                onClick = { openDirectSave(file) },
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(file.fileName)
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 Text(
-                    "真打・元祖/本家1.xは game*.yw のみで読み込めます。元祖/本家2.xは先に head.yw を選択してください。",
+                    "自動検出できない場合は上のファイル選択を使用できます。真打・元祖/本家1.xは game*.yw のみ、元祖/本家2.xは head.yw が必要です。",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 return@Column
