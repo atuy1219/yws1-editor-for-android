@@ -608,9 +608,33 @@ private fun YokaiList(
     val parseResult = remember(data) { runCatching { Yw2SaveCodec.parseYokai(data) } }
     val entries = parseResult.getOrDefault(emptyList())
     var editing by remember { mutableStateOf<Yw2Yokai?>(null) }
+    var query by remember { mutableStateOf("") }
+
+    val filteredEntries = remember(entries, query) {
+        val term = query.trim()
+        if (term.isEmpty()) {
+            entries
+        } else {
+            entries.filter { entry ->
+                val speciesName = master.yokaiName(entry.typeId)
+                speciesName.contains(term, ignoreCase = true) ||
+                    entry.nickname.contains(term, ignoreCase = true) ||
+                    entry.typeId.toString().contains(term) ||
+                    entry.typeId.toString(16).contains(term, ignoreCase = true) ||
+                    entry.slot.toString() == term.removePrefix("#")
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
-        Text("妖怪: " + entries.size + "体", fontWeight = FontWeight.Bold)
+        Text(
+            if (query.isBlank()) {
+                "妖怪: " + entries.size + "体"
+            } else {
+                "妖怪: " + entries.size + "体 / 検索結果 " + filteredEntries.size + "体"
+            },
+            fontWeight = FontWeight.Bold,
+        )
         parseResult.exceptionOrNull()?.let { error ->
             Text(
                 "妖怪領域解析エラー: " + (error.message ?: error::class.java.simpleName),
@@ -619,8 +643,17 @@ private fun YokaiList(
             )
         }
         Spacer(Modifier.height(4.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("妖怪を検索") },
+            placeholder = { Text("名前 / ニックネーム / ID / #スロット") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(4.dp))
         LazyColumn(Modifier.fillMaxSize()) {
-            items(entries, key = { it.slot }) { entry ->
+            items(filteredEntries, key = { it.slot }) { entry ->
                 val displayName = if (entry.nickname.isNotBlank()) {
                     entry.nickname + " (" + master.yokaiName(entry.typeId) + ")"
                 } else {
