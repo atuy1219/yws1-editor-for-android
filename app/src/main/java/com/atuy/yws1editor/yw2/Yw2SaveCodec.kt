@@ -86,7 +86,7 @@ object Yw2SaveCodec {
                 ownerId = readU32(data, o + 60),
                 iv = readStats(data, o + 64),
                 ev = readStats(data, o + 69),
-                statCorrection = readStats(data, o + 74),
+                statCorrection = readSignedStats(data, o + 74),
                 level = data[o + 79].toInt() and 0xFF,
                 loafLevel = (packed ushr 4) and 0xF,
                 attitude = packed and 0xF,
@@ -115,7 +115,7 @@ object Yw2SaveCodec {
             writeU32(out, o + 60, value.ownerId)
             writeStats(out, o + 64, value.iv)
             writeStats(out, o + 69, value.ev)
-            writeStats(out, o + 74, value.statCorrection)
+            writeSignedStats(out, o + 74, value.statCorrection)
             out[o + 79] = value.level.coerceIn(1, 99).toByte()
             out[o + 84] = (
                 ((value.loafLevel.coerceIn(0, 15) shl 4) or value.attitude.coerceIn(0, 15))
@@ -276,6 +276,20 @@ object Yw2SaveCodec {
 
     private fun writeStats(data: ByteArray, offset: Int, value: Yw2Stats) {
         value.values().forEachIndexed { index, v -> data[offset + index] = v.coerceIn(0, 255).toByte() }
+    }
+
+    private fun readSignedStats(data: ByteArray, offset: Int) = Yw2Stats(
+        hp = data[offset].toInt(),
+        power = data[offset + 1].toInt(),
+        spirit = data[offset + 2].toInt(),
+        defense = data[offset + 3].toInt(),
+        speed = data[offset + 4].toInt(),
+    )
+
+    private fun writeSignedStats(data: ByteArray, offset: Int, value: Yw2Stats) {
+        value.values().forEachIndexed { index, v ->
+            data[offset + index] = v.coerceIn(-128, 127).toByte()
+        }
     }
 
     private fun readU16(data: ByteArray, offset: Int): Int =
