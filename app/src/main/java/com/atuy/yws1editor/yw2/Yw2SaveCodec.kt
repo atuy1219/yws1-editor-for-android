@@ -1,6 +1,7 @@
 package com.atuy.yws1editor.yw2
 
 import java.io.IOException
+import java.nio.charset.Charset
 
 data class Yw2Stats(
     val hp: Int,
