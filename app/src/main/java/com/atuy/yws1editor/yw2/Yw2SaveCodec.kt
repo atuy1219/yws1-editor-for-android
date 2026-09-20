@@ -34,13 +34,14 @@ data class Yw2Yokai(
 
 enum class Yw2InventoryKind(
     val label: String,
+    val sectionId: Int,
     val recordSize: Int,
     val maxEntries: Int,
 ) {
-    ITEM("どうぐ", 0x0C, 430),
-    EQUIPMENT("そうび", 0x10, 90),
-    IMPORTANT("だいじなもの", 0x08, 180),
-    SOUL("魂", 0x0C, 100),
+    ITEM("どうぐ", 0x04, 0x0C, 430),
+    EQUIPMENT("そうび", 0x05, 0x10, 90),
+    IMPORTANT("だいじなもの", 0x06, 0x08, 180),
+    SOUL("魂", 0x13, 0x0C, 100),
 }
 
 data class Yw2InventoryEntry(
@@ -60,11 +61,6 @@ object Yw2SaveCodec {
     const val YOKAI_RECORD_SIZE = 0x5C
     const val YOKAI_MAX = 406
     const val MONEY_OFFSET = 0x108E0
-
-    private val INVENTORY_MAGIC = byteArrayOf(
-        0xFE.toByte(), 0x6D, 0x08, 0xFE.toByte(), 0xFF.toByte(), 0x00, 0x00,
-        0x03, 0x48, 0x24, 0x00, 0xFE.toByte(), 0xFF.toByte(),
-    )
 
     fun parseYokai(data: ByteArray): List<Yw2Yokai> {
         val out = ArrayList<Yw2Yokai>()
@@ -124,37 +120,51 @@ object Yw2SaveCodec {
     }
 
     fun parseInventory(data: ByteArray, kind: Yw2InventoryKind): List<Yw2InventoryEntry> {
-        val base = inventoryBase(data) + when (kind) {
-            Yw2InventoryKind.ITEM -> 0
-            Yw2InventoryKind.EQUIPMENT -> 0x1434
-            Yw2InventoryKind.IMPORTANT -> 0x19E0
-            Yw2InventoryKind.SOUL -> 0x1F8C
-        }
-
+        val base = sectionDataStart(data, kind.sectionId, kind.recordSize * kind.maxEntries)
         val out = ArrayList<Yw2InventoryEntry>()
+
         for (slot in 0 until kind.maxEntries) {
             val o = base + slot * kind.recordSize
             if (o + kind.recordSize > data.size) break
+
+            val typeId = readU32(data, o + 4)
+            if (typeId == 0L) continue
+
+            val num1 = readU16(data, o)
             val num2 = readU16(data, o + 2)
-            if (num2 == 0) break
             out += when (kind) {
                 Yw2InventoryKind.ITEM -> Yw2InventoryEntry(
-                    kind, slot, readU16(data, o), num2, readU32(data, o + 4),
+                    kind = kind,
+                    slot = slot,
+                    num1 = num1,
+                    num2 = num2,
+                    typeId = typeId,
                     amount = data[o + 8].toInt() and 0xFF,
                 )
                 Yw2InventoryKind.EQUIPMENT -> Yw2InventoryEntry(
-                    kind, slot, readU16(data, o), num2, readU32(data, o + 4),
+                    kind = kind,
+                    slot = slot,
+                    num1 = num1,
+                    num2 = num2,
+                    typeId = typeId,
                     amount = data[o + 8].toInt() and 0xFF,
                     used = data[o + 12].toInt() and 0xFF,
                 )
                 Yw2InventoryKind.IMPORTANT -> Yw2InventoryEntry(
-                    kind, slot, readU16(data, o), num2, readU32(data, o + 4),
+                    kind = kind,
+                    slot = slot,
+                    num1 = num1,
+                    num2 = num2,
+                    typeId = typeId,
                 )
                 Yw2InventoryKind.SOUL -> Yw2InventoryEntry(
-                    kind, slot, readU16(data, o), num2, readU32(data, o + 4),
+                    kind = kind,
+                    slot = slot,
+                    num1 = num1,
+                    num2 = num2,
+                    typeId = typeId,
                     experience = readU16(data, o + 8),
-                    level = data[o + 10].toInt() and 0xFF,
-                    used = data[o + 11].toInt() and 0xFF,
+                    level = readU16(data, o + 10),
                 )
             }
         }
@@ -163,22 +173,24 @@ object Yw2SaveCodec {
 
     fun updateInventory(data: ByteArray, entry: Yw2InventoryEntry): ByteArray {
         val kind = entry.kind
-        if (entry.slot !in 0 until kind.maxEntries) throw IOException("アイテムスロットが範囲外です")
-        val base = inventoryBase(data) + when (kind) {
-            Yw2InventoryKind.ITEM -> 0
-            Yw2InventoryKind.EQUIPMENT -> 0x1434
-            Yw2InventoryKind.IMPORTANT -> 0x19E0
-            Yw2InventoryKind.SOUL -> 0x1F8C
+        if (entry.slot !in 0 until kind.maxEntries) {
+            throw IOException("アイテムスロットが範囲外です")
         }
+
+        val base = sectionDataStart(data, kind.sectionId, kind.recordSize * kind.maxEntries)
         val o = base + entry.slot * kind.recordSize
-        if (o + kind.recordSize > data.size) throw IOException("アイテムレコードがセーブ範囲外です")
+        if (o + kind.recordSize > data.size) {
+            throw IOException("アイテムレコードがセーブ範囲外です")
+        }
 
         return data.copyOf().also { out ->
             writeU16(out, o, entry.num1)
             writeU16(out, o + 2, entry.num2)
             writeU32(out, o + 4, entry.typeId)
             when (kind) {
-                Yw2InventoryKind.ITEM -> out[o + 8] = entry.amount.coerceIn(0, 255).toByte()
+                Yw2InventoryKind.ITEM -> {
+                    out[o + 8] = entry.amount.coerceIn(0, 255).toByte()
+                }
                 Yw2InventoryKind.EQUIPMENT -> {
                     out[o + 8] = entry.amount.coerceIn(0, 255).toByte()
                     out[o + 12] = entry.used.coerceIn(0, 255).toByte()
@@ -186,8 +198,7 @@ object Yw2SaveCodec {
                 Yw2InventoryKind.IMPORTANT -> Unit
                 Yw2InventoryKind.SOUL -> {
                     writeU16(out, o + 8, entry.experience.coerceIn(0, 65535))
-                    out[o + 10] = entry.level.coerceIn(1, 10).toByte()
-                    out[o + 11] = entry.used.coerceIn(0, 255).toByte()
+                    writeU16(out, o + 10, entry.level.coerceIn(1, 10))
                 }
             }
         }
@@ -218,17 +229,35 @@ object Yw2SaveCodec {
         if (total > 20) throw IOException("育成値は HP/2 + ちから + ようりょく + まもり + すばやさ <= 20 にしてください")
     }
 
-    private fun inventoryBase(data: ByteArray): Int {
-        val limit = minOf(YOKAI_OFFSET, data.size)
-        outer@ for (i in 0..(limit - INVENTORY_MAGIC.size).coerceAtLeast(0)) {
-            for (j in INVENTORY_MAGIC.indices) {
-                if (data[i + j] != INVENTORY_MAGIC[j]) continue@outer
-            }
-            val result = i + 19
-            if (result >= data.size) break
-            return result
+    private fun sectionDataStart(data: ByteArray, sectionId: Int, minimumSize: Int): Int {
+        // Yw2Crypto.Decoded keeps a 0x20-byte compatibility header before the
+        // decrypted save body. Yo-kai Watch 2 stores each domain as:
+        //   FFFE.... / [size:24 | id:8] / section body / FEFF....
+        // This matches ykw-editors' SaveManager::parseSavedata().
+        val first = 0x20
+        val last = data.size - 12
+        if (last < first) throw IOException("YW2セーブ本体が短すぎます")
+
+        for (header in first..last) {
+            if (readU16(data, header) != 0xFFFE) continue
+
+            val descriptor = readU32(data, header + 4)
+            if ((descriptor and 0xFF).toInt() != sectionId) continue
+
+            val size = (descriptor ushr 8).toInt()
+            if (size < minimumSize) continue
+
+            val body = header + 8
+            val footer = body + size
+            if (footer + 4 > data.size) continue
+            if (readU16(data, footer) != 0xFEFF) continue
+
+            return body
         }
-        throw IOException("YW2の持ち物領域を特定できません")
+
+        throw IOException(
+            "YW2の${sectionId.toString(16).uppercase()}セクションを特定できません"
+        )
     }
 
     private fun readStats(data: ByteArray, offset: Int) = Yw2Stats(
