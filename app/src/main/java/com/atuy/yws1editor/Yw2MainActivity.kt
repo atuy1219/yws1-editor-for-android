@@ -974,7 +974,8 @@ private fun InventoryEditDialog(
                         NumberField("魂レベル (1-10)", level) { level = it }
                         NumberField("経験値", experience) { experience = it }
                         Text(
-                            "使用状態: " + if (value.used == 0) "未使用" else "装備中" +
+                            "使用状態: " +
+                                (if (value.used == 0) "未使用" else "装備中") +
                                 "（妖怪の装備から自動計算）",
                             style = MaterialTheme.typography.bodySmall,
                         )
