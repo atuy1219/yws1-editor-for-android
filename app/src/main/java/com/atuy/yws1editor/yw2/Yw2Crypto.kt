@@ -75,9 +75,9 @@ object Yw2Crypto {
         val head = ywTransform(headYw, encrypt = false)
         if (head.size < 0x10) throw IOException("head.yw が短すぎます")
         val seed = readU32Le(head, 0x0C)
-        // Match yw_save.py exactly: a fresh Xorshift is constructed for each byte.
-        val value = XorShift(seed).next(0x100).toInt()
-        return ByteArray(16) { value.toByte() }
+        // ykw-editors uses one Xorshift stream and consumes 16 successive bytes.
+        val rng = XorShift(seed)
+        return ByteArray(16) { rng.next(0x100).toByte() }
     }
 
     private fun decryptWithKey(encrypted: ByteArray, key: ByteArray): ByteArray {
