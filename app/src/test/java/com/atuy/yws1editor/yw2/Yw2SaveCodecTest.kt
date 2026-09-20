@@ -34,7 +34,7 @@ class Yw2SaveCodecTest {
         putU16(data, y, 0)
         putU16(data, y + 2, 1)
         putU32(data, y + 4, 0x10203040)
-        "テスト".toByteArray(Charsets.UTF_8).copyInto(data, y + 8)
+        "テスト".toByteArray(Charset.forName("Shift_JIS")).copyInto(data, y + 8)
         data[y + 42] = 9
         data[y + 46] = 8
         data[y + 50] = 7
