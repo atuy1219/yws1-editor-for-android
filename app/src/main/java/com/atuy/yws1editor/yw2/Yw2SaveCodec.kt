@@ -26,7 +26,7 @@ data class Yw2Yokai(
     val ownerId: Long,
     val iv: Yw2Stats,
     val ev: Yw2Stats,
-    val statCorrection: Yw2Stats,
+    val sportsClub: Yw2Stats,
     val level: Int,
     val loafLevel: Int,
     val attitude: Int,
@@ -86,7 +86,7 @@ object Yw2SaveCodec {
                 ownerId = readU32(data, o + 60),
                 iv = readStats(data, o + 64),
                 ev = readStats(data, o + 69),
-                statCorrection = readSignedStats(data, o + 74),
+                sportsClub = readSignedStats(data, o + 74),
                 level = data[o + 79].toInt() and 0xFF,
                 loafLevel = (packed ushr 4) and 0xF,
                 attitude = packed and 0xF,
@@ -115,7 +115,8 @@ object Yw2SaveCodec {
             writeU32(out, o + 60, value.ownerId)
             writeStats(out, o + 64, value.iv)
             writeStats(out, o + 69, value.ev)
-            writeSignedStats(out, o + 74, value.statCorrection)
+            validateSportsClub(value.sportsClub)
+            writeSignedStats(out, o + 74, value.sportsClub)
             out[o + 79] = value.level.coerceIn(1, 99).toByte()
             out[o + 84] = (
                 ((value.loafLevel.coerceIn(0, 15) shl 4) or value.attitude.coerceIn(0, 15))
@@ -235,6 +236,12 @@ object Yw2SaveCodec {
         if (stats.hp % 2 != 0) throw IOException("育成値HPは偶数である必要があります")
         val total = stats.hp / 2 + stats.power + stats.spirit + stats.defense + stats.speed
         if (total > 20) throw IOException("育成値は HP/2 + ちから + ようりょく + まもり + すばやさ <= 20 にしてください")
+    }
+
+    fun validateSportsClub(stats: Yw2Stats) {
+        if (stats.values().any { it !in -10..25 }) {
+            throw IOException("スポーツクラブ補正は各能力 -10..25 の範囲にしてください")
+        }
     }
 
     private fun sectionDataStart(data: ByteArray, sectionId: Int, minimumSize: Int): Int {
