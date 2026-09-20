@@ -153,7 +153,7 @@ object Yw2Crypto {
         return plain
     }
 
-    private fun calculateMac(message: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray {
+    private fun calculateMac(message: ByteArray, nonce: ByteArray, aes: AesEcb): ByteArray {
         if (message.size > 0xFF_FFFF) throw IOException("CCMメッセージが長すぎます")
         val b0 = ByteArray(16)
         // M=16 => M'=7, L=3 => L'=2, no associated data.
@@ -163,25 +163,25 @@ object Yw2Crypto {
         b0[14] = ((message.size ushr 8) and 0xFF).toByte()
         b0[15] = (message.size and 0xFF).toByte()
 
-        var x = aesBlock(b0, key)
+        var x = aes.encrypt(b0)
         var pos = 0
         while (pos < message.size) {
             val block = ByteArray(16)
             val n = minOf(16, message.size - pos)
             message.copyInto(block, 0, pos, pos + n)
             for (i in 0 until 16) block[i] = (block[i].toInt() xor x[i].toInt()).toByte()
-            x = aesBlock(block, key)
+            x = aes.encrypt(block)
             pos += n
         }
         return x
     }
 
-    private fun ctrCrypt(data: ByteArray, nonce: ByteArray, key: ByteArray, startCounter: Int): ByteArray {
+    private fun ctrCrypt(data: ByteArray, nonce: ByteArray, aes: AesEcb, startCounter: Int): ByteArray {
         val out = ByteArray(data.size)
         var pos = 0
         var counter = startCounter
         while (pos < data.size) {
-            val stream = counterBlock(nonce, counter, key)
+            val stream = counterBlock(nonce, counter, aes)
             val n = minOf(16, data.size - pos)
             for (i in 0 until n) out[pos + i] = (data[pos + i].toInt() xor stream[i].toInt()).toByte()
             pos += n
@@ -190,7 +190,7 @@ object Yw2Crypto {
         return out
     }
 
-    private fun counterBlock(nonce: ByteArray, counter: Int, key: ByteArray): ByteArray {
+    private fun counterBlock(nonce: ByteArray, counter: Int, aes: AesEcb): ByteArray {
         if (counter !in 0..0xFF_FFFF) throw IOException("CCM counter範囲外です")
         val a = ByteArray(16)
         a[0] = 2 // L' for a 12-byte nonce
@@ -198,13 +198,15 @@ object Yw2Crypto {
         a[13] = ((counter ushr 16) and 0xFF).toByte()
         a[14] = ((counter ushr 8) and 0xFF).toByte()
         a[15] = (counter and 0xFF).toByte()
-        return aesBlock(a, key)
+        return aes.encrypt(a)
     }
 
-    private fun aesBlock(block: ByteArray, key: ByteArray): ByteArray {
-        val cipher = Cipher.getInstance("AES/ECB/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"))
-        return cipher.doFinal(block)
+    private class AesEcb(key: ByteArray) {
+        private val cipher = Cipher.getInstance("AES/ECB/NoPadding").apply {
+            init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"))
+        }
+
+        fun encrypt(block: ByteArray): ByteArray = cipher.doFinal(block)
     }
 
     private fun xor(a: ByteArray, b: ByteArray): ByteArray =
