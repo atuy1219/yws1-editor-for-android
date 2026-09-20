@@ -864,6 +864,8 @@ private fun YokaiEditDialog(
             title = "装備" + slot + " を選択",
             entries = equippables,
             currentRef = currentRef,
+            originalRefs = listOf(value.equip1, value.equip2),
+            otherPendingRef = if (slot == 1) equip2 else equip1,
             master = master,
             onDismiss = { equipmentPickerSlot = null },
             onSelect = { selected ->
@@ -947,7 +949,6 @@ private fun InventoryEditDialog(
 ) {
     var typeId by remember(value) { mutableStateOf(value.typeId) }
     var amount by remember(value) { mutableStateOf(value.amount.toString()) }
-    var used by remember(value) { mutableStateOf(value.used.toString()) }
     var experience by remember(value) { mutableStateOf(value.experience.toString()) }
     var level by remember(value) { mutableStateOf(value.level.toString()) }
     var picker by remember { mutableStateOf(false) }
@@ -963,13 +964,20 @@ private fun InventoryEditDialog(
                     Yw2InventoryKind.ITEM -> NumberField("個数", amount) { amount = it }
                     Yw2InventoryKind.EQUIPMENT -> {
                         NumberField("個数", amount) { amount = it }
-                        NumberField("使用中個数", used) { used = it }
+                        Text(
+                            "使用中個数: " + value.used + "（妖怪の装備から自動計算）",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                     Yw2InventoryKind.IMPORTANT -> Text("種類のみ編集します")
                     Yw2InventoryKind.SOUL -> {
                         NumberField("魂レベル (1-10)", level) { level = it }
                         NumberField("経験値", experience) { experience = it }
-                        NumberField("使用フラグ", used) { used = it }
+                        Text(
+                            "使用状態: " + if (value.used == 0) "未使用" else "装備中" +
+                                "（妖怪の装備から自動計算）",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
@@ -980,7 +988,6 @@ private fun InventoryEditDialog(
                     value.copy(
                         typeId = typeId,
                         amount = amount.toIntOrNull() ?: value.amount,
-                        used = used.toIntOrNull() ?: value.used,
                         experience = experience.toIntOrNull() ?: value.experience,
                         level = level.toIntOrNull() ?: value.level,
                     )
@@ -1162,6 +1169,8 @@ private fun EquippedItemDialog(
     title: String,
     entries: List<Yw2EquippableEntry>,
     currentRef: Yw2EquipRef,
+    originalRefs: List<Yw2EquipRef>,
+    otherPendingRef: Yw2EquipRef,
     master: Yw2MasterData,
     onDismiss: () -> Unit,
     onSelect: (Yw2EquipRef) -> Unit,
@@ -1214,7 +1223,11 @@ private fun EquippedItemDialog(
                         key = { entry -> entry.kind.name + ":" + entry.inventorySlot },
                     ) { entry ->
                         val isCurrent = entry.ref == currentRef
-                        val hasFree = isCurrent || entry.used < entry.amount
+                        val originalUseByThisYokai = originalRefs.count { it == entry.ref }
+                        val baseUsage = (entry.used - originalUseByThisYokai).coerceAtLeast(0)
+                        val pendingOtherUsage = if (otherPendingRef == entry.ref) 1 else 0
+                        val predictedUsage = baseUsage + pendingOtherUsage + 1
+                        val hasFree = isCurrent || predictedUsage <= entry.amount
                         val name = master.inventoryName(entry.kind, entry.typeId)
                         val detail = if (entry.kind == Yw2InventoryKind.SOUL) {
                             "魂 Lv." + entry.level + " / " +
