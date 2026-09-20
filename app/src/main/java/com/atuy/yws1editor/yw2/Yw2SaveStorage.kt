@@ -69,9 +69,10 @@ class Yw2SaveStorage(
         val encrypted = gateway.readBytes(file.path)
         val decoded = Yw2Crypto.decrypt(encrypted, headBytes)
 
-        // Reject unrelated or structurally-invalid files immediately.
+        // AES-CCM authentication + YW CRC already validate the encrypted file.
+        // Keep inventory parsing independent so one domain cannot block opening
+        // an otherwise valid save.
         Yw2SaveCodec.parseYokai(decoded.data)
-        Yw2SaveCodec.parseInventory(decoded.data, Yw2InventoryKind.ITEM)
 
         return Yw2LoadedSave(
             file = file,
@@ -112,7 +113,6 @@ class Yw2SaveStorage(
     private fun verifyEncrypted(encrypted: ByteArray, headBytes: ByteArray?) {
         val verify = Yw2Crypto.decrypt(encrypted, headBytes)
         Yw2SaveCodec.parseYokai(verify.data)
-        Yw2SaveCodec.parseInventory(verify.data, Yw2InventoryKind.ITEM)
     }
 
     private fun createBackup(file: Yw2SaveFile): String {
