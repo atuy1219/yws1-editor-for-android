@@ -29,6 +29,36 @@ class Yw2MasterData(context: Context) {
 
     fun yokaiName(id: Long): String = yokaiById[id]?.name ?: "ID:$id"
 
+    private val twoEquipmentSlotNames = setOf(
+        "寝ブタ",
+        "万尾獅子",
+        "ちからモチ",
+        "やきモチ",
+        "さきがけの助",
+        "ばか頭巾",
+        "かぜカモ",
+        "ズルズルづる",
+        "のっぺら坊",
+        "アペリカン",
+        "ドキ土器",
+        "あせっか鬼",
+        "びきゃく",
+        "一つ目小僧",
+        "みちび鬼",
+        "ガ鬼",
+        "ぎしんあん鬼",
+        "ジコチュウ",
+        "こおりんぼう",
+        "トホホギス",
+        "ホリュウ",
+        "ツチノコパンダ",
+    )
+
+    fun equipmentSlotCount(id: Long): Int {
+        val baseName = yokaiById[id]?.name?.substringBefore(" (") ?: return 1
+        return if (baseName in twoEquipmentSlotNames) 2 else 1
+    }
+
     fun inventoryName(kind: Yw2InventoryKind, id: Long): String = when (kind) {
         Yw2InventoryKind.ITEM -> itemById[id]
         Yw2InventoryKind.EQUIPMENT -> equipmentById[id]
