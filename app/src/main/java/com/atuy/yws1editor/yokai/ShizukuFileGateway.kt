@@ -137,7 +137,7 @@ class ShizukuFileGateway {
     }
 
     fun listFileNames(path: String): List<String> {
-        return ShizukuFileServiceClient.requireService().listFileNames(path)
+        return ShizukuFileServiceClient.requireService().listFileNames(path).toList()
     }
 
     fun createDirectories(path: String) {
