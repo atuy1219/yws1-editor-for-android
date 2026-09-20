@@ -295,9 +295,10 @@ private fun Yw2EditorScreen(
                 val encrypted = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     ?: error("game*.yw を読み込めません")
                 val decoded = Yw2Crypto.decrypt(encrypted, headBytes)
-                // Fail early if this is an unrelated file.
+                // Cryptographic validation already happened in decrypt().
+                // Parse the core yokai area here; inventory sections are loaded
+                // independently by their tabs.
                 Yw2SaveCodec.parseYokai(decoded.data)
-                Yw2SaveCodec.parseInventory(decoded.data, Yw2InventoryKind.ITEM)
                 Yw2Session(
                     uri = uri,
                     fileName = displayName(uri) ?: uri.lastPathSegment ?: "game.yw",
@@ -372,7 +373,7 @@ private fun Yw2EditorScreen(
                 .padding(padding)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            Text("妖怪ウォッチ2 セーブエディタ", style = MaterialTheme.typography.headlineSmall)
+            Text("妖怪ウォッチ2 真打 セーブエディタ", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
