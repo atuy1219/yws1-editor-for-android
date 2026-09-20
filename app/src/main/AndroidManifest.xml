@@ -26,6 +26,11 @@
 
         <activity
             android:name=".Yw2MainActivity"
+            android:exported="false"
+            android:theme="@style/Theme.YwEditor" />
+
+        <activity
+            android:name=".LauncherActivity"
             android:exported="true"
             android:theme="@style/Theme.YwEditor">
             <intent-filter>
