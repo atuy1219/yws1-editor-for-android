@@ -128,9 +128,10 @@ object Yw2Crypto {
         if (nonce.size != NONCE_SIZE) throw IOException("nonce長が不正です")
         if (key.size != 16) throw IOException("AES key長が不正です")
 
-        val mac = calculateMac(plain, nonce, key)
-        val tagEncrypted = xor(mac, counterBlock(nonce, 0, key))
-        val ciphertext = ctrCrypt(plain, nonce, key, startCounter = 1)
+        val aes = AesEcb(key)
+        val mac = calculateMac(plain, nonce, aes)
+        val tagEncrypted = xor(mac, counterBlock(nonce, 0, aes))
+        val ciphertext = ctrCrypt(plain, nonce, aes, startCounter = 1)
 
         return ByteArray(0x20 + ciphertext.size).also { out ->
             nonce.copyInto(out, 0)
@@ -146,9 +147,11 @@ object Yw2Crypto {
         key: ByteArray,
     ): ByteArray {
         if (encryptedTag.size != TAG_SIZE) throw IOException("CCM tag長が不正です")
-        val mac = xor(encryptedTag, counterBlock(nonce, 0, key))
-        val plain = ctrCrypt(ciphertext, nonce, key, startCounter = 1)
-        val expected = calculateMac(plain, nonce, key)
+        if (key.size != 16) throw IOException("AES key長が不正です")
+        val aes = AesEcb(key)
+        val mac = xor(encryptedTag, counterBlock(nonce, 0, aes))
+        val plain = ctrCrypt(ciphertext, nonce, aes, startCounter = 1)
+        val expected = calculateMac(plain, nonce, aes)
         if (!MessageDigest.isEqual(mac, expected)) throw IOException("AES-CCM認証に失敗しました")
         return plain
     }
