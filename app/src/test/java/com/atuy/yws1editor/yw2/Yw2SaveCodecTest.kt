@@ -70,6 +70,10 @@ class Yw2SaveCodecTest {
         data[y + 42] = 9
         data[y + 46] = 8
         data[y + 50] = 7
+        putU16(data, y + 0x20, 0x1000)
+        putU16(data, y + 0x22, 1)
+        putU16(data, y + 0x24, 0x3000)
+        putU16(data, y + 0x26, 1)
         putU32(data, y + 52, 1234)
         putU32(data, y + 60, 5678)
         byteArrayOf(16, 8, 8, 8, 8).copyInto(data, y + 64)
@@ -93,6 +97,8 @@ class Yw2SaveCodecTest {
         assertEquals(99, yokai.level)
         assertEquals(5, yokai.loafLevel)
         assertEquals(3, yokai.attitude)
+        assertEquals(Yw2EquipRef(0x1000, 1), yokai.equip1)
+        assertEquals(Yw2EquipRef(0x3000, 1), yokai.equip2)
         assertEquals(Yw2Stats(-2, 1, 0, -1, 2), yokai.sportsClub)
 
         val item = Yw2SaveCodec.parseInventory(data, Yw2InventoryKind.ITEM).single()
@@ -115,7 +121,30 @@ class Yw2SaveCodecTest {
         val reread = Yw2SaveCodec.parseYokai(changed).single()
         assertEquals(88, reread.level)
         assertEquals("ジバ", reread.nickname)
+        assertEquals(Yw2EquipRef(0x1000, 1), reread.equip1)
+        assertEquals(Yw2EquipRef(0x3000, 1), reread.equip2)
         assertEquals(Yw2Stats(-2, 1, 0, -1, 2), reread.sportsClub)
+        assertEquals(
+            1,
+            Yw2SaveCodec.parseInventory(changed, Yw2InventoryKind.EQUIPMENT).single().used,
+        )
+        assertEquals(
+            1,
+            Yw2SaveCodec.parseInventory(changed, Yw2InventoryKind.SOUL).single().used,
+        )
+
+        val unequipped = Yw2SaveCodec.updateYokai(
+            data,
+            yokai.copy(equip1 = Yw2EquipRef(), equip2 = Yw2EquipRef()),
+        )
+        assertEquals(
+            0,
+            Yw2SaveCodec.parseInventory(unequipped, Yw2InventoryKind.EQUIPMENT).single().used,
+        )
+        assertEquals(
+            0,
+            Yw2SaveCodec.parseInventory(unequipped, Yw2InventoryKind.SOUL).single().used,
+        )
 
         val changedItem = Yw2SaveCodec.updateInventory(data, item.copy(amount = 99))
         assertEquals(99, Yw2SaveCodec.parseInventory(changedItem, Yw2InventoryKind.ITEM).single().amount)
