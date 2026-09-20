@@ -7,14 +7,32 @@ import org.junit.Test
 class Yw2CryptoTest {
     @Test
     fun defaultKeyRoundTripIsStable() {
-        val decoded = ByteArray(0x20 + 0x240)
+        // Build a minimal but structurally valid YW2 section tree:
+        // root(F3) -> section 01 + section 07, followed by CRC + YWCipher seed.
+        val payloadSize = 44
+        val decoded = ByteArray(0x20 + payloadSize + 8)
         for (i in 0 until 12) decoded[i] = (i * 7 + 3).toByte()
 
         val bodyStart = 0x20
-        val bodySize = decoded.size - bodyStart
-        for (i in 0 until bodySize - 8) decoded[bodyStart + i] = (i * 13 + 11).toByte()
+        putU32(decoded, bodyStart, 0x0000FFFE)
+        putU32(decoded, bodyStart + 4, (32 shl 8) or 0xF3)
+
+        val s01 = bodyStart + 8
+        putU32(decoded, s01, 0x0000FFFE)
+        putU32(decoded, s01 + 4, (4 shl 8) or 0x01)
+        putU32(decoded, s01 + 8, 0x11223344)
+        putU32(decoded, s01 + 12, 0x0000FEFF)
+
+        val s07 = s01 + 16
+        putU32(decoded, s07, 0x0000FFFE)
+        putU32(decoded, s07 + 4, (4 shl 8) or 0x07)
+        putU32(decoded, s07 + 8, 0x55667788)
+        putU32(decoded, s07 + 12, 0x0000FEFF)
+
+        putU32(decoded, bodyStart + 40, 0x0000FEFF)
         // CRC field is rewritten by encrypt(); seed must remain stable.
         putU32(decoded, decoded.size - 4, 0x13572468)
+        val bodySize = decoded.size - bodyStart
 
         val encrypted1 = Yw2Crypto.encrypt(decoded, Yw2Crypto.KeyMode.DEFAULT)
         val decoded1 = Yw2Crypto.decrypt(encrypted1)
