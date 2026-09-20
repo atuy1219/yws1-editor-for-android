@@ -146,6 +146,44 @@ class Yw2SaveCodecTest {
             Yw2SaveCodec.parseInventory(unequipped, Yw2InventoryKind.SOUL).single().used,
         )
 
+        val sameEquipmentTwice = Yw2SaveCodec.updateYokai(
+            data,
+            yokai.copy(
+                equip1 = Yw2EquipRef(0x1000, 1),
+                equip2 = Yw2EquipRef(0x1000, 1),
+            ),
+        )
+        assertEquals(
+            2,
+            Yw2SaveCodec.parseInventory(
+                sameEquipmentTwice,
+                Yw2InventoryKind.EQUIPMENT,
+            ).single().used,
+        )
+        assertTrue(
+            runCatching {
+                Yw2SaveCodec.updateYokai(
+                    data,
+                    yokai.copy(
+                        equip1 = Yw2EquipRef(0x3000, 1),
+                        equip2 = Yw2EquipRef(0x3000, 1),
+                    ),
+                )
+            }.isFailure
+        )
+        val doubleUsedEquipment = Yw2SaveCodec.parseInventory(
+            sameEquipmentTwice,
+            Yw2InventoryKind.EQUIPMENT,
+        ).single()
+        assertTrue(
+            runCatching {
+                Yw2SaveCodec.updateInventory(
+                    sameEquipmentTwice,
+                    doubleUsedEquipment.copy(amount = 1),
+                )
+            }.isFailure
+        )
+
         val changedItem = Yw2SaveCodec.updateInventory(data, item.copy(amount = 99))
         assertEquals(99, Yw2SaveCodec.parseInventory(changedItem, Yw2InventoryKind.ITEM).single().amount)
 
