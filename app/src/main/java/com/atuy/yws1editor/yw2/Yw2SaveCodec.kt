@@ -168,7 +168,8 @@ object Yw2SaveCodec {
                     num2 = num2,
                     typeId = typeId,
                     experience = readU16(data, o + 8),
-                    level = readU16(data, o + 10),
+                    level = data[o + 10].toInt() and 0xFF,
+                    used = data[o + 11].toInt() and 0xFF,
                 )
             }
         }
@@ -202,7 +203,8 @@ object Yw2SaveCodec {
                 Yw2InventoryKind.IMPORTANT -> Unit
                 Yw2InventoryKind.SOUL -> {
                     writeU16(out, o + 8, entry.experience.coerceIn(0, 65535))
-                    writeU16(out, o + 10, entry.level.coerceIn(1, 10))
+                    out[o + 10] = entry.level.coerceIn(1, 10).toByte()
+                    out[o + 11] = entry.used.coerceIn(0, 255).toByte()
                 }
             }
         }
