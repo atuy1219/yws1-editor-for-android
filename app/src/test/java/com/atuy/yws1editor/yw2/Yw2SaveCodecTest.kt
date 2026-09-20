@@ -93,7 +93,7 @@ class Yw2SaveCodecTest {
         assertEquals(99, yokai.level)
         assertEquals(5, yokai.loafLevel)
         assertEquals(3, yokai.attitude)
-        assertEquals(Yw2Stats(-2, 1, 0, -1, 2), yokai.statCorrection)
+        assertEquals(Yw2Stats(-2, 1, 0, -1, 2), yokai.sportsClub)
 
         val item = Yw2SaveCodec.parseInventory(data, Yw2InventoryKind.ITEM).single()
         assertEquals(7, item.amount)
@@ -115,7 +115,7 @@ class Yw2SaveCodecTest {
         val reread = Yw2SaveCodec.parseYokai(changed).single()
         assertEquals(88, reread.level)
         assertEquals("ジバ", reread.nickname)
-        assertEquals(Yw2Stats(-2, 1, 0, -1, 2), reread.statCorrection)
+        assertEquals(Yw2Stats(-2, 1, 0, -1, 2), reread.sportsClub)
 
         val changedItem = Yw2SaveCodec.updateInventory(data, item.copy(amount = 99))
         assertEquals(99, Yw2SaveCodec.parseInventory(changedItem, Yw2InventoryKind.ITEM).single().amount)
@@ -129,9 +129,12 @@ class Yw2SaveCodecTest {
     fun validatesIvAndEvRules() {
         Yw2SaveCodec.validateIv(Yw2Stats(16, 8, 8, 8, 8))
         Yw2SaveCodec.validateEv(Yw2Stats(8, 4, 4, 4, 4))
+        Yw2SaveCodec.validateSportsClub(Yw2Stats(-10, 25, 0, 5, -3))
 
         assertTrue(runCatching { Yw2SaveCodec.validateIv(Yw2Stats(15, 8, 8, 8, 8)) }.isFailure)
         assertTrue(runCatching { Yw2SaveCodec.validateEv(Yw2Stats(10, 4, 4, 4, 4)) }.isFailure)
+        assertTrue(runCatching { Yw2SaveCodec.validateSportsClub(Yw2Stats(-11, 0, 0, 0, 0)) }.isFailure)
+        assertTrue(runCatching { Yw2SaveCodec.validateSportsClub(Yw2Stats(0, 26, 0, 0, 0)) }.isFailure)
     }
 
     private fun putSection(data: ByteArray, header: Int, id: Int, size: Int): Int {
